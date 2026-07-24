@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TezCrypt - Web Encryption Tool</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>TezCrypt</h1>
+            <p class="subtitle">Modular Encryption/Decryption Utility</p>
+        </header>
+
+        <main>
+            <div class="section">
+                <div class="form-group">
+                    <label for="algorithm">Algorithm:</label>
+                    <select id="algorithm" class="select-input">
+                        <option value="caesar">Caesar Cipher</option>
+                        <option value="rot13">ROT13</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="section">
+                <label for="inputText">Input Text:</label>
+                <textarea 
+                    id="inputText" 
+                    class="text-area" 
+                    placeholder="Enter text to encrypt or decrypt..."
+                    spellcheck="false"></textarea>
+            </div>
+
+            <div class="section">
+                <div class="button-group">
+                    <button id="encryptBtn" class="btn btn-primary">Encrypt</button>
+                    <button id="decryptBtn" class="btn btn-primary">Decrypt</button>
+                </div>
+            </div>
+
+            <div class="section">
+                <label for="outputText">Output Text:</label>
+                <textarea 
+                    id="outputText" 
+                    class="text-area text-area-readonly" 
+                    placeholder="Result will appear here..."
+                    readonly
+                    spellcheck="false"></textarea>
+                <button id="copyBtn" class="btn btn-secondary">Copy Result</button>
+            </div>
+
+            <footer class="info-section">
+                <p><strong>Note:</strong> Caesar cipher and ROT13 are demonstration algorithms. For production use, employ cryptographically secure methods.</p>
+                <p><a href="https://github.com/yourusername/tezcrypt" target="_blank">View on GitHub</a> | <a href="https://github.com/yourusername/tezcrypt#readme" target="_blank">Documentation</a></p>
+            </footer>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

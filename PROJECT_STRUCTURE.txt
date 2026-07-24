@@ -1,0 +1,86 @@
+TezCrypt - Complete Project Structure
+=====================================
+
+DESKTOP APPLICATION (C++)
+├── src/
+│   ├── main.cpp                 Entry point
+│   └── CMakeLists.txt
+│
+├── algorithms/                  Encryption implementations
+│   ├── EncryptionAlgorithm.h   Abstract base class
+│   ├── CaesarCipher.h/.cpp
+│   ├── ROT13.h/.cpp
+│   └── CMakeLists.txt
+│
+├── core/                        Business logic
+│   ├── EncryptionManager.h/.cpp Manager/Registry
+│   └── CMakeLists.txt
+│
+└── gui/                         Qt Widgets UI
+    ├── MainWindow.h/.cpp
+    └── CMakeLists.txt
+
+ROOT CONFIGURATION
+├── CMakeLists.txt               Main build file
+└── .gitignore
+
+WEB APPLICATION (JavaScript) ⭐ NEW
+└── docs/                        GitHub Pages folder
+    ├── index.html              HTML UI
+    ├── style.css               Responsive CSS + dark mode
+    ├── script.js               JavaScript algorithms
+    ├── README.md               Web version docs
+    └── .nojekyll               GitHub Pages config
+
+DOCUMENTATION
+├── README.md                    Project overview
+├── QUICKSTART.md               Desktop quick start
+├── BUILDING.md                 Build instructions
+├── ARCHITECTURE.md             Design patterns
+├── EXTENDING.md                Add algorithms
+├── FILES_REFERENCE.md          Code reference
+├── DELIVERY_SUMMARY.md         Project summary
+├── PROJECT_COMPLETE.md         Completion checklist
+├── GITHUB_PAGES.md            ⭐ NEW - Web deployment
+├── WEB_TESTING.md             ⭐ NEW - Test web locally
+├── WEB_VERSION.md             ⭐ NEW - Web summary
+├── DEPLOYMENT.md              ⭐ NEW - Complete deployment
+└── PROJECT_STRUCTURE.txt       This file
+
+BUILD OUTPUTS (generated)
+└── build/                       CMake build directory
+
+TOTAL: 30+ files, fully documented
+
+DEPLOYMENT OPTIONS
+==================
+
+Option 1: GitHub + Desktop
+  - Push entire project to GitHub
+  - Users can build desktop app
+  - Share web version via GitHub Pages
+
+Option 2: GitHub + Web Only  
+  - Share only web version URL
+  - Friends don't need to build
+  - Perfect for quick sharing
+
+Option 3: Local Desktop
+  - Build desktop app locally
+  - Share with colleagues
+
+QUICK START
+===========
+
+Test Web Version:
+  cd docs && python3 -m http.server 8000
+  -> Visit http://localhost:8000
+
+Deploy to GitHub:
+  1. Create GitHub account (if needed)
+  2. Create "tezcrypt" repository
+  3. Push code: git push
+  4. Enable Pages (source: /docs)
+  5. Share: https://username.github.io/tezcrypt
+
+Your web version is live in < 30 minutes!
