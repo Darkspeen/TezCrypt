@@ -4,6 +4,14 @@ QString ROT13::name() const {
     return QStringLiteral("ROT13");
 }
 
+QString ROT13::metadataTag() const {
+    return QStringLiteral("RSA");
+}
+
+QString ROT13::parameterPlaceholder() const {
+    return QString();
+}
+
 QString ROT13::encrypt(const QString& plaintext) const {
     QString result;
     result.reserve(plaintext.size());

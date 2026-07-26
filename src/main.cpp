@@ -5,6 +5,7 @@
 #include "EncryptionManager.h"
 #include "CaesarCipher.h"
 #include "ROT13.h"
+#include "DelimitedWeaverSimpleA.h"
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
@@ -15,6 +16,7 @@ int main(int argc, char* argv[]) {
     // Register available encryption algorithms
     manager->registerAlgorithm(std::make_shared<CaesarCipher>());
     manager->registerAlgorithm(std::make_shared<ROT13>());
+    manager->registerAlgorithm(std::make_shared<DelimitedWeaverSimpleA>());
 
     // Create and show the main window
     MainWindow window(manager);

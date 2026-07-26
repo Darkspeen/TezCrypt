@@ -4,6 +4,14 @@ QString CaesarCipher::name() const {
     return QStringLiteral("Caesar Cipher");
 }
 
+QString CaesarCipher::metadataTag() const {
+    return QStringLiteral("CSA");
+}
+
+QString CaesarCipher::parameterPlaceholder() const {
+    return QStringLiteral("offset");
+}
+
 QString CaesarCipher::encrypt(const QString& plaintext) const {
     QString result;
     result.reserve(plaintext.size());
@@ -23,6 +31,42 @@ QString CaesarCipher::decrypt(const QString& ciphertext) const {
         result.append(shiftChar(ch, -DEFAULT_SHIFT));
     }
     
+    return result;
+}
+
+QString CaesarCipher::encryptSegment(const QString& segment, const QStringList& params) const {
+    int shift = DEFAULT_SHIFT;
+    if (!params.isEmpty()) {
+        bool ok = false;
+        int parsed = params.first().toInt(&ok);
+        if (ok) {
+            shift = parsed;
+        }
+    }
+
+    QString result;
+    result.reserve(segment.size());
+    for (const QChar& ch : segment) {
+        result.append(shiftChar(ch, shift));
+    }
+    return result;
+}
+
+QString CaesarCipher::decryptSegment(const QString& segment, const QStringList& params) const {
+    int shift = DEFAULT_SHIFT;
+    if (!params.isEmpty()) {
+        bool ok = false;
+        int parsed = params.first().toInt(&ok);
+        if (ok) {
+            shift = parsed;
+        }
+    }
+
+    QString result;
+    result.reserve(segment.size());
+    for (const QChar& ch : segment) {
+        result.append(shiftChar(ch, -shift));
+    }
     return result;
 }
 

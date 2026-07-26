@@ -21,6 +21,8 @@ TezCrypt/
 │   ├── CaesarCipher.cpp           # Caesar cipher implementation
 │   ├── ROT13.h                    # ROT13 cipher header (shift by 13, symmetric)
 │   ├── ROT13.cpp                  # ROT13 cipher implementation
+│   ├── DelimitedWeaverSimpleA.h   # Custom delimiter-based algorithm
+│   ├── DelimitedWeaverSimpleA.cpp # Custom delimiter-based implementation
 │   └── CMakeLists.txt             # Builds tezcrypt_algorithms static library
 │
 ├── core/

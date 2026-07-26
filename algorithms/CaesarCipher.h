@@ -16,8 +16,12 @@ public:
     ~CaesarCipher() override = default;
 
     QString name() const override;
+    QString metadataTag() const override;
+    QString parameterPlaceholder() const override;
     QString encrypt(const QString& plaintext) const override;
     QString decrypt(const QString& ciphertext) const override;
+    QString encryptSegment(const QString& segment, const QStringList& params) const override;
+    QString decryptSegment(const QString& segment, const QStringList& params) const override;
 
 private:
     static constexpr int DEFAULT_SHIFT = 3;

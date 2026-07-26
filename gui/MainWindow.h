@@ -36,6 +36,26 @@ private slots:
      */
     void onDecryptClicked();
 
+    /**
+     * @brief Wraps the current selection or cursor position with the selected algorithm tag delimiters
+     */
+    void onWrapTagClicked();
+
+    /**
+     * @brief Upload a file for encryption or decryption
+     */
+    void onUploadFileClicked();
+
+    /**
+     * @brief Copy the output text to clipboard
+     */
+    void onCopyOutputClicked();
+
+    /**
+     * @brief Update the tag letter combos when algorithm selection changes
+     */
+    void onAlgorithmSelectionChanged(int index);
+
 private:
     /**
      * @brief Initialize all UI components
@@ -55,10 +75,15 @@ private:
 
     // UI Components
     QComboBox* m_algorithmCombo;
+    QComboBox* m_subAlgorithmCombo;
+    QComboBox* m_variantCombo;
     QTextEdit* m_inputText;
     QTextEdit* m_outputText;
+    QPushButton* m_uploadButton;
     QPushButton* m_encryptButton;
     QPushButton* m_decryptButton;
+    QPushButton* m_wrapButton;
+    QPushButton* m_copyButton;
 
     // Manager for algorithm access
     std::shared_ptr<EncryptionManager> m_manager;

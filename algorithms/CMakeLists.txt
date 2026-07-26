@@ -1,12 +1,14 @@
 set(ALGORITHMS_SOURCES
     CaesarCipher.cpp
     ROT13.cpp
+    DelimitedWeaverSimpleA.cpp
 )
 
 set(ALGORITHMS_HEADERS
     EncryptionAlgorithm.h
     CaesarCipher.h
     ROT13.h
+    DelimitedWeaverSimpleA.h
 )
 
 add_library(tezcrypt_algorithms STATIC ${ALGORITHMS_SOURCES} ${ALGORITHMS_HEADERS})

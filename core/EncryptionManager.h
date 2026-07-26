@@ -54,6 +54,35 @@ public:
     bool hasAlgorithm(const QString& id) const;
 
     /**
+     * @brief Get an algorithm by its metadata tag
+     * @param tag The algorithm tag identifier
+     * @return Shared pointer to the algorithm, or nullptr if not found
+     */
+    EncryptionAlgorithmPtr getAlgorithmByTag(const QString& tag) const;
+
+    /**
+     * @brief Encrypt a text containing wrapper tags and emit trailer tags.
+     * @param plaintext The text with opening wrapper markers
+     * @return Text with encrypted segments and appended trailer metadata tags
+     */
+    QString encryptTaggedText(const QString& plaintext) const;
+
+    /**
+     * @brief Decrypt a ciphertext that contains appended delimited metadata tags.
+     * If no recognized tags are present, the ciphertext is returned unchanged.
+     * @param ciphertext The tagged ciphertext
+     * @return Decrypted plaintext if tags were found, otherwise the original text
+     */
+    QString decryptTaggedText(const QString& ciphertext) const;
+
+    /**
+     * @brief Check whether a text contains delimited metadata tags.
+     * @param text The text to inspect
+     * @return True if there is at least one trailing tag block
+     */
+    bool hasTaggedText(const QString& text) const;
+
+    /**
      * @brief Get the number of registered algorithms
      * @return Count of registered algorithms
      */
@@ -62,6 +91,7 @@ public:
 private:
     // Map: algorithm_id -> algorithm_instance
     std::unordered_map<std::string, EncryptionAlgorithmPtr> m_algorithms;
+    std::unordered_map<std::string, EncryptionAlgorithmPtr> m_algorithmTags;
 };
 
 #endif // ENCRYPTION_MANAGER_H
