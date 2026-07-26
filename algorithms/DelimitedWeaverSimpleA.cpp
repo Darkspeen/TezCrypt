@@ -162,22 +162,72 @@ QString DelimitedWeaverSimpleA::decrypt(const QString& ciphertext) const {
     return result;
 }
 
-QString DelimitedWeaverSimpleA::encryptSegment(const QString& segment, const QStringList& params) const {
+QString DelimitedWeaverSimpleA::encryptSegment(
+    const QString& segment,
+    const QStringList& params) const
+{
     Q_UNUSED(params);
+
+    if (segment.size() <= 1)
+        return segment;
+
+    const int split = segment.size() / 2;
+
+    QString firstHalf = segment.left(split);
+    QString secondHalf = segment.mid(split);
+
+    std::reverse(secondHalf.begin(), secondHalf.end());
+
     QString result;
     result.reserve(segment.size());
-    for (const QChar ch : segment) {
-        result.append(QChar(ch.unicode() + 1));
+
+    const int maxLength = std::max(firstHalf.size(), secondHalf.size());
+
+    for (int i = 0; i < maxLength; ++i)
+    {
+        if (i < firstHalf.size())
+            result += firstHalf[i];
+
+        if (i < secondHalf.size())
+            result += secondHalf[i];
     }
+
     return result;
 }
 
-QString DelimitedWeaverSimpleA::decryptSegment(const QString& segment, const QStringList& params) const {
+QString DelimitedWeaverSimpleA::decryptSegment(
+    const QString& segment,
+    const QStringList& params) const
+{
     Q_UNUSED(params);
-    QString result;
-    result.reserve(segment.size());
-    for (const QChar ch : segment) {
-        result.append(QChar(ch.unicode() - 1));
+
+    if (segment.size() <= 1)
+        return segment;
+
+    const int firstSize  = segment.size() / 2;
+    const int secondSize = segment.size() - firstSize;
+
+    QString firstHalf;
+    QString reversedSecondHalf;
+
+    firstHalf.reserve(firstSize);
+    reversedSecondHalf.reserve(secondSize);
+
+    int index = 0;
+
+    while (index < segment.size())
+    {
+        if (firstHalf.size() < firstSize)
+            firstHalf += segment[index++];
+
+        if (index < segment.size() &&
+            reversedSecondHalf.size() < secondSize)
+        {
+            reversedSecondHalf += segment[index++];
+        }
     }
-    return result;
+
+    std::reverse(reversedSecondHalf.begin(), reversedSecondHalf.end());
+
+    return firstHalf + reversedSecondHalf;
 }
