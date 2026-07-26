@@ -1,6 +1,7 @@
 #include "DelimitedWeaverSimpleA.h"
 #include <QVector>
 #include <QPair>
+#include <algorithm>
 
 const QString DelimitedWeaverSimpleA::OpenTagPrefix = QStringLiteral("|#");
 const QString DelimitedWeaverSimpleA::Delimiter = QStringLiteral("|#|");
