@@ -217,18 +217,11 @@ void MainWindow::onWrapTagClicked() {
         return;
     }
 
-    QString mainTagLetter = selectedAlgorithm->metadataTag().left(1);
-    QString subAlgorithmSelection = m_subAlgorithmCombo->currentText();
-    QString variantSelection = m_variantCombo->currentText();
-    QString selectedTagLetters = QStringLiteral("%1%2%3")
-        .arg(mainTagLetter)
-        .arg(subAlgorithmSelection.left(1).toUpper())
-        .arg(variantSelection.left(1).toUpper());
-
+    QString selectedTag = selectedAlgorithm->metadataTag();
     QString params = selectedAlgorithm->parameterPlaceholder();
-    QString wrappingPrefix = QStringLiteral("|#%1:%2|")
-        .arg(selectedTagLetters)
-        .arg(params);
+    QString wrappingPrefix = params.isEmpty()
+        ? QStringLiteral("|#%1|").arg(selectedTag)
+        : QStringLiteral("|#%1:%2|").arg(selectedTag).arg(params);
     QString wrappingSuffix = QStringLiteral("|#|");
 
     QTextCursor cursor = m_inputText->textCursor();

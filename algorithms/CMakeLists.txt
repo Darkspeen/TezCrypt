@@ -2,6 +2,7 @@ set(ALGORITHMS_SOURCES
     CaesarCipher.cpp
     ROT13.cpp
     DelimitedWeaverSimpleA.cpp
+    SaltedFibonacciCipher.cpp
 )
 
 set(ALGORITHMS_HEADERS
@@ -9,6 +10,7 @@ set(ALGORITHMS_HEADERS
     CaesarCipher.h
     ROT13.h
     DelimitedWeaverSimpleA.h
+    SaltedFibonacciCipher.h
 )
 
 add_library(tezcrypt_algorithms STATIC ${ALGORITHMS_SOURCES} ${ALGORITHMS_HEADERS})

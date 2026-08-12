@@ -6,6 +6,7 @@
 #include "CaesarCipher.h"
 #include "ROT13.h"
 #include "DelimitedWeaverSimpleA.h"
+#include "SaltedFibonacciCipher.h"
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
@@ -17,6 +18,7 @@ int main(int argc, char* argv[]) {
     manager->registerAlgorithm(std::make_shared<CaesarCipher>());
     manager->registerAlgorithm(std::make_shared<ROT13>());
     manager->registerAlgorithm(std::make_shared<DelimitedWeaverSimpleA>());
+    manager->registerAlgorithm(std::make_shared<SaltedFibonacciCipher>());
 
     // Create and show the main window
     MainWindow window(manager);

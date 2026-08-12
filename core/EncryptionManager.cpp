@@ -52,12 +52,12 @@ bool EncryptionManager::hasAlgorithm(const QString& id) const {
 }
 
 bool EncryptionManager::hasTaggedText(const QString& text) const {
-    static const QRegularExpression tagPattern(QStringLiteral("\\|x[0-9A-Fa-f]{6}x[0-9A-Fa-f]{6}#[A-Za-z0-9]{2,8}(?::[^|]*)?\\|$") );
+    static const QRegularExpression tagPattern(QStringLiteral("(?:\\|\\|x[0-9A-Fa-f]{6}x[0-9A-Fa-f]{6}#[A-Za-z0-9]{2,8}(?::[^|]*)?\\|\\||\\|x[0-9A-Fa-f]{6}x[0-9A-Fa-f]{6}#[A-Za-z0-9]{2,8}(?::[^|]*)?\\|)$") );
     return tagPattern.match(text).hasMatch();
 }
 
 QString EncryptionManager::encryptTaggedText(const QString& plaintext) const {
-    static const QRegularExpression openPattern(QStringLiteral("\\|#([A-Za-z0-9]{2,8})(?::([^|]*))?\\|"));
+    static const QRegularExpression openPattern(QStringLiteral("(?:\\|\\|#|\\|#)([A-Za-z0-9]{2,8})(?::([^|]*))?(?:\\|\\||\\|)"));
     QString result;
     result.reserve(plaintext.size());
 
@@ -83,6 +83,11 @@ QString EncryptionManager::encryptTaggedText(const QString& plaintext) const {
 
         int contentStart = openEnd;
         int closeIndex = plaintext.indexOf(QStringLiteral("|#|"), contentStart);
+        int closeLength = 3;
+        if (closeIndex < 0) {
+            closeIndex = plaintext.indexOf(QStringLiteral("||#||"), contentStart);
+            closeLength = 5;
+        }
         if (closeIndex < 0) {
             result += plaintext.mid(openStart);
             break;
@@ -91,8 +96,8 @@ QString EncryptionManager::encryptTaggedText(const QString& plaintext) const {
         QString segment = plaintext.mid(contentStart, closeIndex - contentStart);
         auto algorithm = getAlgorithmByTag(algorithmTag);
         if (!algorithm) {
-            result += plaintext.mid(openStart, closeIndex + 3 - openStart);
-            cursor = closeIndex + 3;
+            result += plaintext.mid(openStart, closeIndex + closeLength - openStart);
+            cursor = closeIndex + closeLength;
             continue;
         }
 
@@ -101,13 +106,14 @@ QString EncryptionManager::encryptTaggedText(const QString& plaintext) const {
         result += encryptedSegment;
         int segmentEnd = result.size();
 
-        trailers.append(QStringLiteral("|x%1x%2#%3%4|")
+        const QString trailerParameter = algorithm->trailerParameter(segment, parameters);
+        trailers.append(QStringLiteral("||x%1x%2#%3%4||")
             .arg(segmentStart, 6, 16, QLatin1Char('0'))
             .arg(segmentEnd, 6, 16, QLatin1Char('0'))
             .arg(algorithmTag)
-            .arg(parameterText.isEmpty() ? QString() : QStringLiteral(":") + parameterText));
+            .arg(trailerParameter.isEmpty() ? QString() : QStringLiteral(":") + trailerParameter));
 
-        cursor = closeIndex + 3;
+        cursor = closeIndex + closeLength;
     }
 
     for (const QString& trailer : trailers) {
@@ -118,7 +124,7 @@ QString EncryptionManager::encryptTaggedText(const QString& plaintext) const {
 }
 
 QString EncryptionManager::decryptTaggedText(const QString& ciphertext) const {
-    static const QRegularExpression tagPattern(QStringLiteral("^x([0-9A-Fa-f]{6})x([0-9A-Fa-f]{6})#([A-Za-z0-9]{2,8})(?::([^|]*))?$") );
+    static const QRegularExpression tagPattern(QStringLiteral("^(?:\\|\\|)?x([0-9A-Fa-f]{6})x([0-9A-Fa-f]{6})#([A-Za-z0-9]{2,8})(?::([^|]*))?(?:\\|\\|)?$") );
     QString body = ciphertext;
 
     struct TaggedRange {
@@ -129,14 +135,17 @@ QString EncryptionManager::decryptTaggedText(const QString& ciphertext) const {
     };
 
     QVector<TaggedRange> ranges;
-    while (!body.isEmpty() && body.endsWith(QLatin1Char('|'))) {
-        int closingPipe = body.lastIndexOf(QLatin1Char('|'), body.size() - 2);
-        if (closingPipe < 0) {
+    while (!body.isEmpty()) {
+        int trailerStart = body.lastIndexOf(QStringLiteral("||x"));
+        if (trailerStart < 0) {
+            trailerStart = body.lastIndexOf(QStringLiteral("|x"));
+        }
+        if (trailerStart < 0) {
             break;
         }
 
-        QString inner = body.mid(closingPipe + 1, body.size() - closingPipe - 2);
-        auto match = tagPattern.match(inner);
+        QString trailingText = body.mid(trailerStart);
+        auto match = tagPattern.match(trailingText);
         if (!match.hasMatch()) {
             break;
         }
@@ -157,7 +166,7 @@ QString EncryptionManager::decryptTaggedText(const QString& ciphertext) const {
         }
 
         ranges.prepend({start, end, algorithmTag, params});
-        body.chop(body.size() - closingPipe);
+        body = body.left(trailerStart);
     }
 
     if (ranges.isEmpty()) {

@@ -7,7 +7,7 @@ const QString DelimitedWeaverSimpleA::OpenTagPrefix = QStringLiteral("|#");
 const QString DelimitedWeaverSimpleA::Delimiter = QStringLiteral("|#|");
 const QString DelimitedWeaverSimpleA::ClosingDelimiter = QStringLiteral("|#|");
 const QRegularExpression DelimitedWeaverSimpleA::OpenTagPattern(
-    QStringLiteral("\\|#([A-Za-z0-9]{2,8})(?::([^|]*))?\\|")
+    QStringLiteral("(?:\\|\\|#|\\|#)([A-Za-z0-9]{2,8})(?::([^|]*))?(?:\\|\\||\\|)")
 );
 const QRegularExpression DelimitedWeaverSimpleA::TagSuffixPattern(
     QStringLiteral("^x([0-9A-Fa-f]{6})x([0-9A-Fa-f]{6})#([A-Za-z0-9]{2,8})(?::([^|]*))?$")
@@ -26,7 +26,7 @@ QString DelimitedWeaverSimpleA::metadataTag() const {
 }
 
 QString DelimitedWeaverSimpleA::parameterPlaceholder() const {
-    return QStringLiteral("salt,position,num_of_times");
+    return QString();
 }
 
 QStringList DelimitedWeaverSimpleA::parseParameters(const QString& parameterString) {
@@ -98,7 +98,7 @@ QString DelimitedWeaverSimpleA::encrypt(const QString& plaintext) const {
     output += plaintext.mid(cursor);
 
     for (const auto& range : ranges) {
-        output += QStringLiteral("|x%1x%2#%3%4|")
+        output += QStringLiteral("||x%1x%2#%3%4||")
             .arg(range.start, PositionHexWidth, 16, QLatin1Char('0'))
             .arg(range.end, PositionHexWidth, 16, QLatin1Char('0'))
             .arg(range.algorithmTag)
@@ -117,14 +117,21 @@ QString DelimitedWeaverSimpleA::decrypt(const QString& ciphertext) const {
     };
     QVector<RangeEntry> ranges;
 
-    while (!body.isEmpty() && body.endsWith(QLatin1Char('|'))) {
-        int closingPipe = body.lastIndexOf(QLatin1Char('|'), body.size() - 2);
-        if (closingPipe < 0) {
+    static const QRegularExpression trailerPattern(
+        QStringLiteral("^(?:\\|\\|)?x([0-9A-Fa-f]{6})x([0-9A-Fa-f]{6})#([A-Za-z0-9]{2,8})(?::([^|]*))?(?:\\|\\|)?$")
+    );
+
+    while (!body.isEmpty()) {
+        int trailerStart = body.lastIndexOf(QStringLiteral("||x"));
+        if (trailerStart < 0) {
+            trailerStart = body.lastIndexOf(QStringLiteral("|x"));
+        }
+        if (trailerStart < 0) {
             break;
         }
 
-        QString inner = body.mid(closingPipe + 1, body.size() - closingPipe - 2);
-        auto match = TagSuffixPattern.match(inner);
+        QString trailingText = body.mid(trailerStart);
+        auto match = trailerPattern.match(trailingText);
         if (!match.hasMatch()) {
             break;
         }
@@ -142,7 +149,7 @@ QString DelimitedWeaverSimpleA::decrypt(const QString& ciphertext) const {
         }
 
         ranges.prepend({start, end, params});
-        body.chop(body.size() - closingPipe);
+        body = body.left(trailerStart);
     }
 
     if (ranges.isEmpty()) {

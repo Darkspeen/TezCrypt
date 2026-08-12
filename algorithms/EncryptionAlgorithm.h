@@ -76,6 +76,15 @@ public:
     }
 
     /**
+     * @brief Returns the trailer parameter text for a wrapped segment.
+     * The default preserves the opening-tag parameters for compatibility.
+     */
+    virtual QString trailerParameter(const QString& segment, const QStringList& params) const {
+        Q_UNUSED(segment);
+        return params.join(QStringLiteral(","));
+    }
+
+    /**
      * @brief Decrypts a single delimited segment.
      * By default, this defers to the parameterized implementation.
      * @param segment The segment to decrypt
