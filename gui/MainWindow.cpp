@@ -217,6 +217,8 @@ void MainWindow::onAlgorithmSelectionChanged(int /*index*/) {
             ? QStringLiteral("Simple")
             : subAlgorithmCode == QLatin1Char('F')
                 ? QStringLiteral("Fibonacci")
+                : subAlgorithmCode == QLatin1Char('X')
+                    ? QStringLiteral("XOR")
                 : QString(subAlgorithmCode);
         m_subAlgorithmCombo->addItem(subAlgorithm);
         m_variantCombo->addItem(QString(tag.at(2)));

@@ -14,7 +14,7 @@ const QRegularExpression DelimitedWeaverSimpleA::TagSuffixPattern(
 );
 
 QString DelimitedWeaverSimpleA::name() const {
-    return QStringLiteral("Weaver Simple A");
+    return QStringLiteral("Weaver");
 }
 
 QString DelimitedWeaverSimpleA::id() const {

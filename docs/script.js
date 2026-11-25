@@ -132,15 +132,11 @@ class ROT13 {
 
 class SaltedFibonacciCipher {
     constructor() {
-        this.name = "Salted Fibonacci Cipher";
+        this.name = "XOR Key-Weaver";
     }
 
     metadataTag() {
-        return "SFA";
-    }
-
-    legacyMetadataTags() {
-        return ["AFA"];
+        return "XFA";
     }
 
     parameterPlaceholder() {
@@ -382,7 +378,7 @@ class SaltedFibonacciCipher {
 
 class WeaverSimpleA {
     constructor() {
-        this.name = "Weaver Simple A";
+        this.name = "Weaver";
     }
 
     metadataTag() {
@@ -464,7 +460,7 @@ class AlgorithmRegistry {
             'caesar': new CaesarCipher(),
             'rot13': new ROT13(),
             'weaver-simple-a': new WeaverSimpleA(),
-            'salted-fibonacci': new SaltedFibonacciCipher()
+            'xor-key-weaver': new SaltedFibonacciCipher()
         };
         this.tagMap = this.buildTagMap();
     }
@@ -598,7 +594,7 @@ class TezCryptWeb {
         const tag = algorithm && typeof algorithm.metadataTag === "function"
             ? algorithm.metadataTag()
             : "";
-        const subAlgorithmLabels = { S: "Simple", F: "Fibonacci" };
+        const subAlgorithmLabels = { S: "Simple", F: "Fibonacci", X: "XOR" };
 
         this.elements.subAlgorithm.innerHTML = "";
         this.elements.variant.innerHTML = "";

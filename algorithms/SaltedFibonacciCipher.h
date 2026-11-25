@@ -13,7 +13,6 @@ public:
     QString name() const override;
     QString id() const override;
     QString metadataTag() const override;
-    QStringList legacyMetadataTags() const override;
     QString parameterPlaceholder() const override;
     QString encrypt(const QString& plaintext) const override;
     QString decrypt(const QString& ciphertext) const override;

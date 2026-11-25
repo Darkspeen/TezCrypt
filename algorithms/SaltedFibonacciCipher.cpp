@@ -347,19 +347,15 @@ bool parseTrailerParameter(const QString& parameter, QString& hexIndex, int& fib
 } // namespace
 
 QString SaltedFibonacciCipher::name() const {
-    return QStringLiteral("Salted Fibonacci Cipher");
+    return QStringLiteral("XOR Key-Weaver");
 }
 
 QString SaltedFibonacciCipher::id() const {
-    return QStringLiteral("salted_fibonacci_cipher");
+    return QStringLiteral("xor_key_weaver");
 }
 
 QString SaltedFibonacciCipher::metadataTag() const {
-    return QStringLiteral("SFA");
-}
-
-QStringList SaltedFibonacciCipher::legacyMetadataTags() const {
-    return {QStringLiteral("AFA")};
+    return QStringLiteral("XFA");
 }
 
 QString SaltedFibonacciCipher::parameterPlaceholder() const {
