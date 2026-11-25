@@ -37,10 +37,9 @@ QStringList DelimitedWeaverSimpleA::parseParameters(const QString& parameterStri
 }
 
 QString DelimitedWeaverSimpleA::serializeParameters(const QStringList& params) {
-    if (params.isEmpty()) {
-        return QString();
-    }
-    return QStringLiteral(":") + params.join(',');
+    QStringList versionedParams = params;
+    versionedParams.prepend(QString::number(TAGGED_FORMAT_VERSION));
+    return QStringLiteral(":") + versionedParams.join(',');
 }
 
 QString DelimitedWeaverSimpleA::encrypt(const QString& plaintext) const {
@@ -143,6 +142,9 @@ QString DelimitedWeaverSimpleA::decrypt(const QString& ciphertext) const {
         QString algorithmTag = match.captured(3);
         QString parameterText = match.captured(4);
         QStringList params = parseParameters(parameterText);
+        if (!params.isEmpty() && params.first() == QString::number(TAGGED_FORMAT_VERSION)) {
+            params.removeFirst();
+        }
 
         if (!okStart || !okEnd || algorithmTag != metadataTag()) {
             break;

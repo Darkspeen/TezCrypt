@@ -21,6 +21,7 @@ public:
     QString encrypt(const QString& plaintext) const override;
     QString decrypt(const QString& ciphertext) const override;
     QString encryptSegment(const QString& segment, const QStringList& params) const override;
+    QString trailerParameter(const QString& segment, const QStringList& params) const override;
     QString decryptSegment(const QString& segment, const QStringList& params) const override;
 
 private:

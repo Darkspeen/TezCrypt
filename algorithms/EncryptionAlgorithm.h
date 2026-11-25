@@ -15,6 +15,9 @@
  */
 class EncryptionAlgorithm {
 public:
+    // Shared version of the tagged-trailer parameter format.
+    static constexpr int TAGGED_FORMAT_VERSION = 1;
+
     virtual ~EncryptionAlgorithm() = default;
 
     /**
@@ -82,6 +85,55 @@ public:
     virtual QString trailerParameter(const QString& segment, const QStringList& params) const {
         Q_UNUSED(segment);
         return params.join(QStringLiteral(","));
+    }
+
+    /**
+     * @brief Returns the number of algorithm-specific trailer parameters.
+     * Override this when the trailer shape differs from the opening-tag
+     * parameter placeholder.
+     */
+    virtual int trailerParameterCount() const {
+        const QString placeholder = parameterPlaceholder();
+        return placeholder.isEmpty() ? 0 : placeholder.count(QLatin1Char(',')) + 1;
+    }
+
+    /**
+     * @brief Encrypts a tagged segment and produces its matching trailer parameters.
+     * Algorithms with per-encryption metadata can override this to keep the
+     * encrypted segment and its trailer parameters consistent. The default
+     * trailer starts with TAGGED_FORMAT_VERSION, followed by algorithm parameters.
+     */
+    virtual QString encryptTaggedSegment(
+        const QString& segment,
+        const QStringList& params,
+        QString& trailerParams
+    ) const {
+        QString encrypted = encryptSegment(segment, params);
+        const QString algorithmParams = trailerParameter(segment, params);
+        trailerParams = QString::number(TAGGED_FORMAT_VERSION);
+        if (!algorithmParams.isEmpty()) {
+            trailerParams += QStringLiteral(",") + algorithmParams;
+        }
+        return encrypted;
+    }
+
+    /**
+     * @brief Decrypts a tagged segment, consuming the shared format version.
+     * Trailers without a recognized version are passed through unchanged for
+     * compatibility with existing tagged text.
+     */
+    virtual QString decryptTaggedSegment(const QString& segment, const QStringList& params) const {
+        if (params.size() == trailerParameterCount() + 1) {
+            bool versionOk = false;
+            const int version = params.first().toInt(&versionOk);
+            if (versionOk) {
+                if (version == TAGGED_FORMAT_VERSION) {
+                    return decryptSegment(segment, params.mid(1));
+                }
+                return segment;
+            }
+        }
+        return decryptSegment(segment, params);
     }
 
     /**

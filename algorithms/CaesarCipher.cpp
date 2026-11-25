@@ -52,6 +52,14 @@ QString CaesarCipher::encryptSegment(const QString& segment, const QStringList& 
     return result;
 }
 
+QString CaesarCipher::trailerParameter(const QString& segment, const QStringList& params) const {
+    Q_UNUSED(segment);
+
+    bool ok = false;
+    const int shift = params.value(0).toInt(&ok);
+    return QString::number(ok ? shift : DEFAULT_SHIFT);
+}
+
 QString CaesarCipher::decryptSegment(const QString& segment, const QStringList& params) const {
     int shift = DEFAULT_SHIFT;
     if (!params.isEmpty()) {

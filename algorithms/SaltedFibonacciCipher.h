@@ -3,6 +3,11 @@
 
 #include "EncryptionAlgorithm.h"
 
+/**
+ * Demonstration cipher that encrypts with a user-supplied key and weaves its
+ * recoverable hex encoding into the output using Fibonacci-spaced positions.
+ * Because the key is embedded, this provides obfuscation, not secure encryption.
+ */
 class SaltedFibonacciCipher : public EncryptionAlgorithm {
 public:
     QString name() const override;
@@ -12,8 +17,14 @@ public:
     QString encrypt(const QString& plaintext) const override;
     QString decrypt(const QString& ciphertext) const override;
     QString encryptSegment(const QString& segment, const QStringList& params) const override;
+    QString encryptTaggedSegment(
+        const QString& segment,
+        const QStringList& params,
+        QString& trailerParams
+    ) const override;
     QString decryptSegment(const QString& segment, const QStringList& params) const override;
     QString trailerParameter(const QString& segment, const QStringList& params) const override;
+    int trailerParameterCount() const override;
 };
 
 #endif // SALTED_FIBONACCI_CIPHER_H

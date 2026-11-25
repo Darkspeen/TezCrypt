@@ -179,6 +179,7 @@ void MainWindow::populateAlgorithms() {
 
     QStringList names = m_manager->getAlgorithmNames();
     m_algorithmCombo->addItems(names);
+    onAlgorithmSelectionChanged(m_algorithmCombo->currentIndex());
 }
 
 void MainWindow::onEncryptClicked() {
@@ -194,8 +195,32 @@ void MainWindow::onAlgorithmSelectionChanged(int /*index*/) {
         return;
     }
 
-    m_subAlgorithmCombo->setCurrentText(QStringLiteral("Simple"));
-    m_variantCombo->setCurrentText(QStringLiteral("A"));
+    EncryptionAlgorithmPtr selectedAlgorithm;
+    for (const QString& id : m_manager->getAlgorithmIds()) {
+        auto algorithm = m_manager->getAlgorithm(id);
+        if (algorithm && algorithm->name() == m_algorithmCombo->currentText()) {
+            selectedAlgorithm = algorithm;
+            break;
+        }
+    }
+
+    m_subAlgorithmCombo->clear();
+    m_variantCombo->clear();
+    if (!selectedAlgorithm) {
+        return;
+    }
+
+    const QString tag = selectedAlgorithm->metadataTag();
+    if (tag.size() >= 3) {
+        const QChar subAlgorithmCode = tag.at(1);
+        const QString subAlgorithm = subAlgorithmCode == QLatin1Char('S')
+            ? QStringLiteral("Simple")
+            : subAlgorithmCode == QLatin1Char('F')
+                ? QStringLiteral("Fibonacci")
+                : QString(subAlgorithmCode);
+        m_subAlgorithmCombo->addItem(subAlgorithm);
+        m_variantCombo->addItem(QString(tag.at(2)));
+    }
 }
 
 void MainWindow::onWrapTagClicked() {

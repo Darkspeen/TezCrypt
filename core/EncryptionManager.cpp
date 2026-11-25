@@ -101,12 +101,12 @@ QString EncryptionManager::encryptTaggedText(const QString& plaintext) const {
             continue;
         }
 
-        QString encryptedSegment = algorithm->encryptSegment(segment, parameters);
+        QString trailerParameter;
+        QString encryptedSegment = algorithm->encryptTaggedSegment(segment, parameters, trailerParameter);
         int segmentStart = result.size();
         result += encryptedSegment;
         int segmentEnd = result.size();
 
-        const QString trailerParameter = algorithm->trailerParameter(segment, parameters);
         trailers.append(QStringLiteral("||x%1x%2#%3%4||")
             .arg(segmentStart, 6, 16, QLatin1Char('0'))
             .arg(segmentEnd, 6, 16, QLatin1Char('0'))
@@ -174,7 +174,8 @@ QString EncryptionManager::decryptTaggedText(const QString& ciphertext) const {
     }
 
     QString result = body;
-    for (const TaggedRange& taggedRange : ranges) {
+    for (auto rangeIt = ranges.crbegin(); rangeIt != ranges.crend(); ++rangeIt) {
+        const TaggedRange& taggedRange = *rangeIt;
         auto algorithm = getAlgorithmByTag(taggedRange.algorithmTag);
         if (!algorithm) {
             continue;
@@ -185,7 +186,7 @@ QString EncryptionManager::decryptTaggedText(const QString& ciphertext) const {
         }
 
         QString segment = result.mid(taggedRange.start, taggedRange.end - taggedRange.start);
-        QString decryptedSegment = algorithm->decryptSegment(segment, taggedRange.params);
+        QString decryptedSegment = algorithm->decryptTaggedSegment(segment, taggedRange.params);
         result.replace(taggedRange.start, taggedRange.end - taggedRange.start, decryptedSegment);
     }
 
