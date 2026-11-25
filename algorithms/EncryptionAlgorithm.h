@@ -57,6 +57,10 @@ public:
         return id().toUpper();
     }
 
+    virtual QStringList legacyMetadataTags() const {
+        return {};
+    }
+
     /**
      * @brief Encrypts a single delimited segment.
      * By default, this defers to the parameterized implementation.

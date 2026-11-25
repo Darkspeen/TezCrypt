@@ -136,7 +136,11 @@ class SaltedFibonacciCipher {
     }
 
     metadataTag() {
-        return "AFA";
+        return "SFA";
+    }
+
+    legacyMetadataTags() {
+        return ["AFA"];
     }
 
     parameterPlaceholder() {
@@ -149,10 +153,20 @@ class SaltedFibonacciCipher {
     }
 
     async decrypt(ciphertext) {
-        const standalone = /^(?:1|SF1):(\d+):(\d+):/.exec(ciphertext);
+        const legacyStandalone = /^(?:1|SF1):(\d+):(\d+):/.exec(ciphertext);
+        if (legacyStandalone) {
+            const payload = ciphertext.slice(legacyStandalone[0].length);
+            return this._decryptEmbeddedAtStart(
+                payload,
+                Number(legacyStandalone[1]),
+                Number(legacyStandalone[2])
+            );
+        }
+
+        const standalone = /^1:(\d+):/.exec(ciphertext);
         if (standalone) {
             const payload = ciphertext.slice(standalone[0].length);
-            return this._decryptEmbedded(payload, Number(standalone[1]), Number(standalone[2]));
+            return await this._decryptEmbedded(payload, Number(standalone[1])) ?? ciphertext;
         }
 
         return ciphertext;
@@ -172,7 +186,12 @@ class SaltedFibonacciCipher {
 
     async encryptTaggedSegment(segment, params = []) {
         if (!segment) {
-            return { ciphertext: "", trailerParams: `${TAGGED_FORMAT_VERSION},0,0` };
+            const keyBytes = new TextEncoder().encode(params[0] ?? "tezcrypt");
+            const start = await this._startIndexForKey(keyBytes);
+            return {
+                ciphertext: "",
+                trailerParams: `${TAGGED_FORMAT_VERSION},${start},${keyBytes.length * 2}`
+            };
         }
         const payload = await this._buildPayload(segment, params[0] ?? "tezcrypt");
         return {
@@ -182,10 +201,19 @@ class SaltedFibonacciCipher {
     }
 
     async decryptSegment(segment, params = []) {
-        if (params.length !== 2) {
-            return segment;
+        if (params.length === 1 && /^\d+$/.test(params[0])) {
+            const plaintext = await this._decryptEmbedded(segment, Number(params[0]));
+            if (plaintext !== null) {
+                return plaintext;
+            }
         }
-        return this._decryptEmbedded(segment, Number(params[0]), Number(params[1]));
+        if (params.length === 2 && /^\d+$/.test(params[0]) && /^\d+$/.test(params[1])) {
+            return this._decryptEmbeddedAtStart(segment, Number(params[0]), Number(params[1]));
+        }
+        if (params.length === 3 && /^(?:1|SF1)$/.test(params[0])) {
+            return this._decryptEmbeddedAtStart(segment, Number(params[1]), Number(params[2]));
+        }
+        return segment;
     }
 
     async _buildPayload(plaintext, key) {
@@ -194,9 +222,7 @@ class SaltedFibonacciCipher {
         const encryptedBytes = await this._xorWithKey(plaintextBytes, keyBytes);
         const encodedKey = this._toHex(keyBytes);
         const encodedText = this._toBase64(encryptedBytes);
-        const startBytes = new Uint32Array(1);
-        crypto.getRandomValues(startBytes);
-        const start = startBytes[0] % 12;
+        const start = await this._startIndexForKey(keyBytes);
         return {
             body: this._weaveKey(encodedText, encodedKey, start),
             start,
@@ -204,26 +230,57 @@ class SaltedFibonacciCipher {
         };
     }
 
-    async _decryptEmbedded(payload, start, keyLength) {
+    async _startIndexForKey(keyBytes) {
+        if (typeof crypto === "undefined" || !crypto.subtle) {
+            throw new Error("Web Crypto is unavailable; use HTTPS or localhost.");
+        }
+        const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", keyBytes));
+        return digest[0] % 12;
+    }
+
+    async _decryptEmbedded(payload, keyLength) {
+        if (!Number.isInteger(keyLength) || keyLength < 0
+            || keyLength > payload.length || keyLength % 2 !== 0) {
+            return payload;
+        }
+
+        for (let start = 0; start < 12; start++) {
+            const plaintext = await this._decryptEmbeddedAtStart(payload, start, keyLength, true);
+            if (plaintext !== null) {
+                return plaintext;
+            }
+        }
+        return null;
+    }
+
+    async _decryptEmbeddedAtStart(payload, start, keyLength, verifyStart = false) {
         if (!Number.isInteger(start) || !Number.isInteger(keyLength)
             || start < 0 || start >= 12 || keyLength < 0 || keyLength > payload.length
             || keyLength % 2 !== 0) {
-            return payload;
+            return verifyStart ? null : payload;
         }
 
         const [encodedText, encodedKey] = this._unweaveKey(payload, start, keyLength);
         if (!/^(?:[0-9a-f]{2})*$/i.test(encodedKey)) {
-            return payload;
+            return verifyStart ? null : payload;
         }
 
         const keyBytes = this._fromHex(encodedKey);
         const encryptedBytes = this._fromBase64(encodedText);
-        if (!keyBytes || !encryptedBytes) {
-            return payload;
+        if (!keyBytes || !encryptedBytes
+            || (verifyStart && await this._startIndexForKey(keyBytes) !== start)) {
+            return verifyStart ? null : payload;
         }
-        return new TextDecoder("utf-8", { fatal: true }).decode(
-            await this._xorWithKey(encryptedBytes, keyBytes)
-        );
+        try {
+            return new TextDecoder("utf-8", { fatal: true }).decode(
+                await this._xorWithKey(encryptedBytes, keyBytes)
+            );
+        } catch (error) {
+            if (error instanceof TypeError && verifyStart) {
+                return null;
+            }
+            throw error;
+        }
     }
 
     async _xorWithKey(input, key) {
@@ -418,6 +475,11 @@ class AlgorithmRegistry {
                 const tag = algo.metadataTag();
                 if (tag) {
                     map[tag] = algo;
+                }
+                if (typeof algo.legacyMetadataTags === "function") {
+                    for (const legacyTag of algo.legacyMetadataTags()) {
+                        map[legacyTag] = algo;
+                    }
                 }
             }
             return map;

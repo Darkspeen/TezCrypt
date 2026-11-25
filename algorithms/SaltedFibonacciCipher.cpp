@@ -2,7 +2,6 @@
 
 #include <QByteArray>
 #include <QCryptographicHash>
-#include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QStringList>
 #include <QVector>
@@ -38,6 +37,11 @@ QByteArray encryptWithSalt(const QByteArray& plaintext, const QByteArray& saltBy
 
 QByteArray decryptWithSalt(const QByteArray& ciphertext, const QByteArray& saltBytes) {
     return encryptWithSalt(ciphertext, saltBytes);
+}
+
+int startIndexForKey(const QByteArray& keyBytes) {
+    const QByteArray digest = QCryptographicHash::hash(keyBytes, QCryptographicHash::Sha256);
+    return static_cast<unsigned char>(digest.at(0)) % 12;
 }
 
 QVector<int> buildInsertionPositions(int baseLength, int saltLength, int fibonacciCount, int insertIndex) {
@@ -197,22 +201,72 @@ bool decryptEmbeddedPayload(
     return true;
 }
 
+bool decryptDerivedEmbeddedPayload(
+    const QString& payload,
+    int encodedKeyLength,
+    QString& plaintext
+) {
+    if (encodedKeyLength < 0 || encodedKeyLength > payload.size() || encodedKeyLength % 2 != 0) {
+        return false;
+    }
+
+    for (int start = 0; start < 12; ++start) {
+        QString encodedText;
+        QString encodedKey;
+        if (!unweaveKey(payload, encodedKeyLength, start, encodedText, encodedKey)) {
+            continue;
+        }
+
+        const QByteArray keyBytes = QByteArray::fromHex(encodedKey.toLatin1());
+        if (keyBytes.toHex() != encodedKey.toLatin1().toLower()
+            || startIndexForKey(keyBytes) != start) {
+            continue;
+        }
+
+        const QByteArray encryptedBytes = QByteArray::fromBase64(encodedText.toLatin1());
+        if (encryptedBytes.toBase64() != encodedText.toLatin1()) {
+            continue;
+        }
+
+        plaintext = QString::fromUtf8(decryptWithSalt(encryptedBytes, keyBytes));
+        return true;
+    }
+    return false;
+}
+
 bool decryptStandalonePayload(const QString& ciphertext, QString& plaintext) {
-    static const QRegularExpression headerPattern(QStringLiteral("^(?:1|SF1):(\\d+):(\\d+):"));
-    const auto header = headerPattern.match(ciphertext);
-    if (!header.hasMatch()) {
-        return false;
+    static const QRegularExpression legacyHeaderPattern(
+        QStringLiteral("^(?:1|SF1):(\\d+):(\\d+):")
+    );
+    const auto legacyHeader = legacyHeaderPattern.match(ciphertext);
+    if (legacyHeader.hasMatch()) {
+        bool startOk = false;
+        bool keyLengthOk = false;
+        const int start = legacyHeader.captured(1).toInt(&startOk);
+        const int encodedKeyLength = legacyHeader.captured(2).toInt(&keyLengthOk);
+        if (!startOk || !keyLengthOk) {
+            return false;
+        }
+        return decryptEmbeddedPayload(
+            ciphertext.mid(legacyHeader.capturedEnd()),
+            start,
+            encodedKeyLength,
+            plaintext
+        );
     }
 
-    bool startOk = false;
+    static const QRegularExpression currentHeaderPattern(QStringLiteral("^1:(\\d+):"));
+    const auto currentHeader = currentHeaderPattern.match(ciphertext);
+    if (!currentHeader.hasMatch()) {
+        return false;
+    }
     bool keyLengthOk = false;
-    const int start = header.captured(1).toInt(&startOk);
-    const int encodedKeyLength = header.captured(2).toInt(&keyLengthOk);
-    if (!startOk || !keyLengthOk) {
-        return false;
-    }
-
-    return decryptEmbeddedPayload(ciphertext.mid(header.capturedEnd()), start, encodedKeyLength, plaintext);
+    const int encodedKeyLength = currentHeader.captured(1).toInt(&keyLengthOk);
+    return keyLengthOk && decryptDerivedEmbeddedPayload(
+        ciphertext.mid(currentHeader.capturedEnd()),
+        encodedKeyLength,
+        plaintext
+    );
 }
 
 QByteArray recoverSaltBytes(const QString& payload, int fibonacciCount, int insertIndex) {
@@ -258,7 +312,7 @@ PayloadBundle buildPayload(const QString& plaintext, const QString& key) {
     const QByteArray encryptedBytes = encryptWithSalt(plaintextBytes, saltBytes);
     const QString encodedSalt = QString::fromLatin1(saltBytes.toHex());
     const QString encodedText = QString::fromLatin1(encryptedBytes.toBase64());
-    const int start = static_cast<int>(QRandomGenerator::system()->bounded(12U));
+    const int start = startIndexForKey(saltBytes);
     const QString embedded = weaveKey(encodedText, encodedSalt, start);
     return {embedded, start, static_cast<int>(encodedSalt.size())};
 }
@@ -301,9 +355,11 @@ QString SaltedFibonacciCipher::id() const {
 }
 
 QString SaltedFibonacciCipher::metadataTag() const {
-    // This algorithm follows the X/Y/Z wrapper convention:
-    // X = AES, Y = Fibonacci, Z = Variation A => AFA.
-    return QStringLiteral("AFA");
+    return QStringLiteral("SFA");
+}
+
+QStringList SaltedFibonacciCipher::legacyMetadataTags() const {
+    return {QStringLiteral("AFA")};
 }
 
 QString SaltedFibonacciCipher::parameterPlaceholder() const {
@@ -338,7 +394,11 @@ QString SaltedFibonacciCipher::encryptTaggedSegment(
     QString& trailerParams
 ) const {
     if (segment.isEmpty()) {
-        trailerParams = QStringLiteral("1,0,0");
+        const QByteArray keyBytes = params.value(0, QStringLiteral("tezcrypt")).toUtf8();
+        trailerParams = QStringLiteral("%1,%2,%3")
+            .arg(EncryptionAlgorithm::TAGGED_FORMAT_VERSION)
+            .arg(startIndexForKey(keyBytes))
+            .arg(keyBytes.toHex().size());
         return {};
     }
 
@@ -352,7 +412,7 @@ QString SaltedFibonacciCipher::encryptTaggedSegment(
 
 QString SaltedFibonacciCipher::trailerParameter(const QString& segment, const QStringList& params) const {
     if (segment.isEmpty()) {
-        return QStringLiteral("0,0");
+        return QStringLiteral("0");
     }
 
     const QString key = params.value(0, QStringLiteral("tezcrypt"));
@@ -392,6 +452,15 @@ QString SaltedFibonacciCipher::decryptSegment(const QString& segment, const QStr
             return versionOnePlaintext;
         }
         return segment;
+    }
+
+    if (params.size() == 1) {
+        bool keyLengthOk = false;
+        const int encodedKeyLength = params.first().toInt(&keyLengthOk);
+        if (keyLengthOk
+            && decryptDerivedEmbeddedPayload(segment, encodedKeyLength, versionOnePlaintext)) {
+            return versionOnePlaintext;
+        }
     }
 
     QString hexIndex;

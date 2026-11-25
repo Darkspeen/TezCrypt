@@ -9,6 +9,12 @@ void EncryptionManager::registerAlgorithm(EncryptionAlgorithmPtr algorithm) {
         if (!tag.isEmpty()) {
             m_algorithmTags[tag.toStdString()] = algorithm;
         }
+        for (const QString& legacyTag : algorithm->legacyMetadataTags()) {
+            const QString normalizedTag = legacyTag.toLower();
+            if (!normalizedTag.isEmpty()) {
+                m_algorithmTags[normalizedTag.toStdString()] = algorithm;
+            }
+        }
     }
 }
 
