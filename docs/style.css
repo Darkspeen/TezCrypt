@@ -242,6 +242,32 @@ label {
     display: block;
 }
 
+.split-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-medium);
+    align-items: flex-end;
+}
+
+.split-row .form-group {
+    flex: 1 1 220px;
+}
+
+.btn-tertiary {
+    background: #95a5a6;
+    color: white;
+}
+
+.btn-tertiary:hover {
+    background: #7f8c8d;
+    transform: translateY(-2px);
+    box-shadow: var(--shadow);
+}
+
+.btn-tertiary:active {
+    transform: translateY(0);
+}
+
 @keyframes slideIn {
     from {
         opacity: 0;

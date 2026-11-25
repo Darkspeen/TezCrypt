@@ -14,16 +14,35 @@
         </header>
 
         <main>
-            <div class="section">
+            <div class="section split-row">
                 <div class="form-group">
                     <label for="algorithm">Algorithm:</label>
-                    <select id="algorithm" class="select-input">
-                        <option value="caesar">Caesar Cipher</option>
-                        <option value="rot13">ROT13</option>
-                        <option value="salted-fibonacci">Salted Fibonacci Cipher</option>
+                    <select id="algorithm" class="select-input"></select>
+                </div>
+                <button id="uploadBtn" class="btn btn-tertiary">Upload File</button>
+            </div>
+
+            <div class="section split-row">
+                <div class="form-group">
+                    <label for="subAlgorithm">Sub-algorithm:</label>
+                    <select id="subAlgorithm" class="select-input">
+                        <option value="simple">Simple</option>
                     </select>
                 </div>
+
+                <div class="form-group">
+                    <label for="variant">Variant:</label>
+                    <select id="variant" class="select-input">
+                        <option value="A">A</option>
+                        <option value="B">B</option>
+                        <option value="C">C</option>
+                    </select>
+                </div>
+
+                <button id="wrapBtn" class="btn btn-secondary">Wrap Tag</button>
             </div>
+
+            <input id="fileInput" type="file" accept=".txt,text/plain" hidden />
 
             <div class="section">
                 <label for="inputText">Input Text:</label>
@@ -53,7 +72,7 @@
             </div>
 
             <footer class="info-section">
-                <p><strong>Note:</strong> The web demo now includes the AES/Fibonacci/A variant with a compact wrapped payload format, using the AFA wrapper tag convention and carrying the salt-derived prefix in the trailer metadata.</p>
+                <p><strong>Note:</strong> Use the Wrap Tag button to insert algorithm wrapper markers into the input. This enables tagged encryption with trailer metadata for safe round-trip decryption.</p>
                 <p><a href="https://github.com/Darkspeen/TezCrypt" target="_blank">View on GitHub</a> | <a href="https://github.com/Darkspeen/TezCrypt#readme" target="_blank">Documentation</a></p>
             </footer>
         </main>

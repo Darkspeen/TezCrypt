@@ -215,6 +215,19 @@ class AlgorithmRegistry {
             'rot13': new ROT13(),
             'salted-fibonacci': new SaltedFibonacciCipher()
         };
+        this.tagMap = this.buildTagMap();
+    }
+
+    buildTagMap() {
+        return Object.values(this.algorithms).reduce((map, algo) => {
+            if (algo && typeof algo.metadataTag === 'function') {
+                const tag = algo.metadataTag();
+                if (tag) {
+                    map[tag] = algo;
+                }
+            }
+            return map;
+        }, {});
     }
 
     getAlgorithm(id) {
@@ -228,6 +241,10 @@ class AlgorithmRegistry {
     getAllAlgorithms() {
         return this.algorithms;
     }
+
+    getAlgorithmByTag(tag) {
+        return this.tagMap[tag] || null;
+    }
 }
 
 // === UI Controller ===
@@ -239,6 +256,11 @@ class TezCryptWeb {
         
         this.elements = {
             algorithm: document.getElementById('algorithm'),
+            subAlgorithm: document.getElementById('subAlgorithm'),
+            variant: document.getElementById('variant'),
+            wrapBtn: document.getElementById('wrapBtn'),
+            uploadBtn: document.getElementById('uploadBtn'),
+            fileInput: document.getElementById('fileInput'),
             inputText: document.getElementById('inputText'),
             outputText: document.getElementById('outputText'),
             encryptBtn: document.getElementById('encryptBtn'),
@@ -250,7 +272,8 @@ class TezCryptWeb {
     }
 
     init() {
-        // Set up event listeners
+        this.populateAlgorithmOptions();
+
         this.elements.algorithm.addEventListener('change', (e) => {
             this.currentAlgorithmId = e.target.value;
         });
@@ -267,12 +290,49 @@ class TezCryptWeb {
             this.copyToClipboard();
         });
 
-        // Allow Enter key in text areas for crypto operations
+        this.elements.wrapBtn.addEventListener('click', () => {
+            this.wrapTag();
+        });
+
+        this.elements.uploadBtn.addEventListener('click', () => {
+            this.elements.fileInput.click();
+        });
+
+        this.elements.fileInput.addEventListener('change', (event) => {
+            const files = event.target.files;
+            if (files && files.length > 0) {
+                this.loadFile(files[0]);
+            }
+            event.target.value = '';
+        });
+
         this.elements.inputText.addEventListener('keydown', (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                 this.performCrypto(true);
             }
         });
+    }
+
+    populateAlgorithmOptions() {
+        const algorithmSelect = this.elements.algorithm;
+        algorithmSelect.innerHTML = '';
+
+        const algorithms = this.registry.getAllAlgorithms();
+        Object.keys(algorithms).forEach((algorithmId) => {
+            const algorithm = algorithms[algorithmId];
+            if (!algorithm) {
+                return;
+            }
+
+            const option = document.createElement('option');
+            option.value = algorithmId;
+            option.textContent = algorithm.name;
+            algorithmSelect.appendChild(option);
+        });
+
+        if (algorithmSelect.options.length > 0) {
+            this.currentAlgorithmId = algorithmSelect.options[0].value;
+        }
     }
 
     performCrypto(isEncrypt) {
@@ -290,10 +350,14 @@ class TezCryptWeb {
         }
 
         try {
-            const result = isEncrypt 
-                ? algorithm.encrypt(inputText) 
-                : algorithm.decrypt(inputText);
-            
+            const result = isEncrypt
+                ? this.isTaggedInput(inputText)
+                    ? this.encryptTaggedText(inputText)
+                    : algorithm.encrypt(inputText)
+                : this.hasTrailerTags(inputText)
+                    ? this.decryptTaggedText(inputText)
+                    : algorithm.decrypt(inputText);
+
             this.elements.outputText.value = result;
         } catch (error) {
             this.elements.outputText.value = `Error: ${error.message}`;
@@ -301,16 +365,57 @@ class TezCryptWeb {
         }
     }
 
+    wrapTag() {
+        const algorithm = this.registry.getAlgorithm(this.currentAlgorithmId);
+        if (!algorithm) {
+            this.elements.outputText.value = 'Error: Algorithm not found.';
+            return;
+        }
+
+        const algorithmTag = typeof algorithm.metadataTag === 'function' ? algorithm.metadataTag() : '';
+        const params = typeof algorithm.parameterPlaceholder === 'function' ? algorithm.parameterPlaceholder() : '';
+
+        if (!algorithmTag) {
+            alert('This algorithm does not support wrapper tags.');
+            return;
+        }
+
+        const prefix = params ? `|#${algorithmTag}:${params}|` : `|#${algorithmTag}|`;
+        const suffix = '|#|';
+        const textarea = this.elements.inputText;
+        const { selectionStart, selectionEnd, value } = textarea;
+        const selectedText = selectionStart !== selectionEnd
+            ? value.slice(selectionStart, selectionEnd)
+            : 'TEXT_TO_ENCRYPT';
+
+        const before = value.slice(0, selectionStart);
+        const after = value.slice(selectionEnd);
+        textarea.value = `${before}${prefix}${selectedText}${suffix}${after}`;
+
+        const cursorPosition = before.length + prefix.length + selectedText.length;
+        textarea.setSelectionRange(cursorPosition, cursorPosition);
+        textarea.focus();
+    }
+
+    loadFile(file) {
+        const reader = new FileReader();
+        reader.onload = () => {
+            this.elements.inputText.value = reader.result || '';
+        };
+        reader.onerror = () => {
+            alert('Could not load file.');
+        };
+        reader.readAsText(file, 'utf-8');
+    }
+
     copyToClipboard() {
         const outputText = this.elements.outputText.value;
-
         if (!outputText) {
             return;
         }
 
         navigator.clipboard.writeText(outputText)
             .then(() => {
-                // Show temporary success message
                 const btn = this.elements.copyBtn;
                 const originalText = btn.textContent;
                 btn.textContent = 'Copied!';
@@ -326,6 +431,123 @@ class TezCryptWeb {
                 alert('Failed to copy to clipboard');
             });
     }
+
+    isTaggedInput(text) {
+        return /\|#[A-Za-z0-9]{2,8}(?::[^|]*)?\|/.test(text);
+    }
+
+    hasTrailerTags(text) {
+        return /(?:\|\|)?x[0-9A-Fa-f]{6}x[0-9A-Fa-f]{6}#[A-Za-z0-9]{2,8}/.test(text);
+    }
+
+    encryptTaggedText(input) {
+        const openTagRegex = /\|#([A-Za-z0-9]{2,8})(?::([^|]*))?\|/g;
+        const closingTag = '|#|';
+        let cursor = 0;
+        let output = '';
+        const ranges = [];
+
+        while (cursor < input.length) {
+            openTagRegex.lastIndex = cursor;
+            const match = openTagRegex.exec(input);
+            if (!match) {
+                output += input.slice(cursor);
+                break;
+            }
+
+            if (match.index > cursor) {
+                output += input.slice(cursor, match.index);
+            }
+
+            const algorithmTag = match[1];
+            const params = match[2] || '';
+            const segmentStart = match.index + match[0].length;
+            const closeIndex = input.indexOf(closingTag, segmentStart);
+            if (closeIndex < 0) {
+                output += input.slice(match.index);
+                break;
+            }
+
+            const segment = input.slice(segmentStart, closeIndex);
+            const algorithm = this.registry.getAlgorithmByTag(algorithmTag);
+            const encryptedSegment = algorithm ? algorithm.encrypt(segment) : segment;
+            const start = output.length;
+            output += encryptedSegment;
+            const end = output.length;
+            ranges.push({ start, end, algorithmTag, params });
+            cursor = closeIndex + closingTag.length;
+        }
+
+        if (ranges.length === 0) {
+            return input;
+        }
+
+        for (const range of ranges) {
+            const startHex = range.start.toString(16).padStart(6, '0').toUpperCase();
+            const endHex = range.end.toString(16).padStart(6, '0').toUpperCase();
+            const trailerParams = range.params ? `:${range.params}` : '';
+            output += `||x${startHex}x${endHex}#${range.algorithmTag}${trailerParams}||`;
+        }
+
+        return output;
+    }
+
+    decryptTaggedText(input) {
+        const trailerRegex = /^(?:\|\|)?x([0-9A-Fa-f]{6})x([0-9A-Fa-f]{6})#([A-Za-z0-9]{2,8})(?::([^|]*))?(?:\|\|)?$/;
+        let body = input;
+        const ranges = [];
+
+        while (true) {
+            let trailerStart = body.lastIndexOf('||x');
+            if (trailerStart < 0) {
+                trailerStart = body.lastIndexOf('|x');
+            }
+            if (trailerStart < 0) {
+                break;
+            }
+
+            const trailerText = body.slice(trailerStart);
+            const match = trailerRegex.exec(trailerText);
+            if (!match) {
+                break;
+            }
+
+            const start = parseInt(match[1], 16);
+            const end = parseInt(match[2], 16);
+            const algorithmTag = match[3];
+            const params = match[4] || '';
+
+            if (Number.isNaN(start) || Number.isNaN(end)) {
+                break;
+            }
+
+            ranges.unshift({ start, end, algorithmTag, params });
+            body = body.slice(0, trailerStart);
+        }
+
+        if (ranges.length === 0) {
+            return input;
+        }
+
+        let result = body;
+        for (let i = ranges.length - 1; i >= 0; i--) {
+            const range = ranges[i];
+            if (range.start < 0 || range.end > result.length || range.start >= range.end) {
+                continue;
+            }
+
+            const algorithm = this.registry.getAlgorithmByTag(range.algorithmTag);
+            if (!algorithm) {
+                continue;
+            }
+
+            const segment = result.slice(range.start, range.end);
+            const decryptedSegment = algorithm.decrypt(segment);
+            result = result.slice(0, range.start) + decryptedSegment + result.slice(range.end);
+        }
+
+        return result;
+    }
 }
 
 // === Initialize Application ===
@@ -336,5 +558,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Expose for testing (optional)
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { CaesarCipher, ROT13, AlgorithmRegistry };
+    module.exports = { CaesarCipher, ROT13, SaltedFibonacciCipher, AlgorithmRegistry };
 }
