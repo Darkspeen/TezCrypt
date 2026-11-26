@@ -203,7 +203,7 @@ class SaltedFibonacciCipher {
             const start = await this._startIndexForKey(keyBytes);
             const hexKey = this._toHex(keyBytes);
             const encodedKey = chunkedLayout
-                ? this._toBase64(new TextEncoder().encode(hexKey))
+                ? this._encodeXfbKey(hexKey, start)
                 : hexKey;
             return {
                 ciphertext: "",
@@ -281,11 +281,11 @@ class SaltedFibonacciCipher {
         const plaintextBytes = new TextEncoder().encode(plaintext);
         const encryptedBytes = await this._xorWithKey(plaintextBytes, keyBytes);
         const hexKey = this._toHex(keyBytes);
-        const encodedKey = chunkedLayout
-            ? this._toBase64(new TextEncoder().encode(hexKey))
-            : hexKey;
         const encodedText = this._toBase64(encryptedBytes);
         const start = await this._startIndexForKey(keyBytes);
+        const encodedKey = chunkedLayout
+            ? this._encodeXfbKey(hexKey, start)
+            : hexKey;
         return {
             body: chunkedLayout
                 ? this._weaveKeyInChunks(encodedText, encodedKey, start)
@@ -293,6 +293,43 @@ class SaltedFibonacciCipher {
             start,
             keyLength: encodedKey.length
         };
+    }
+
+    _encodeXfbKey(hexKey, start) {
+        const hexBytes = new TextEncoder().encode(hexKey);
+        for (let i = 0; i < hexBytes.length; i++) {
+            hexBytes[i] ^= start;
+        }
+        return this._toBase64(hexBytes);
+    }
+
+    async _decodeXfbKey(encodedKey, start) {
+        const obfuscatedHexBytes = this._fromBase64(encodedKey);
+        if (!obfuscatedHexBytes || this._toBase64(obfuscatedHexBytes) !== encodedKey) {
+            return null;
+        }
+
+        const hexBytes = obfuscatedHexBytes.slice();
+        for (let i = 0; i < hexBytes.length; i++) {
+            hexBytes[i] ^= start;
+        }
+        let hexKey;
+        try {
+            hexKey = new TextDecoder("ascii", { fatal: true }).decode(hexBytes);
+        } catch (error) {
+            if (error instanceof TypeError) {
+                return null;
+            }
+            throw error;
+        }
+        if (!/^(?:[0-9a-f]{2})*$/i.test(hexKey)) {
+            return null;
+        }
+        const keyBytes = this._fromHex(hexKey);
+        if (await this._startIndexForKey(keyBytes) === start) {
+            return keyBytes;
+        }
+        return null;
     }
 
     async _startIndexForKey(keyBytes) {
@@ -348,15 +385,10 @@ class SaltedFibonacciCipher {
 
         let keyBytes;
         if (base64Key) {
-            const hexBytes = this._fromBase64(encodedKey);
-            if (!hexBytes || this._toBase64(hexBytes) !== encodedKey) {
+            keyBytes = await this._decodeXfbKey(encodedKey, start);
+            if (!keyBytes) {
                 return verifyStart ? null : payload;
             }
-            const hexKey = new TextDecoder("ascii", { fatal: true }).decode(hexBytes);
-            if (!/^(?:[0-9a-f]{2})*$/i.test(hexKey)) {
-                return verifyStart ? null : payload;
-            }
-            keyBytes = this._fromHex(hexKey);
         } else {
             keyBytes = this._fromHex(encodedKey);
         }
@@ -443,6 +475,10 @@ class SaltedFibonacciCipher {
         let position = start;
         let first = 1;
         let second = 1;
+
+        if (position < baseLength && keyLength > 0) {
+            positions.push(position);
+        }
 
         while (positions.length < keyLength) {
             position += first;

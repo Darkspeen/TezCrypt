@@ -163,6 +163,10 @@ QVector<int> buildChunkPositions(int baseLength, int keyLength, int start) {
     qint64 first = 1;
     qint64 second = 1;
 
+    if (position < baseLength && keyLength > 0) {
+        positions.append(static_cast<int>(position));
+    }
+
     while (positions.size() < keyLength) {
         position += first;
         if (position >= baseLength) {
@@ -325,13 +329,26 @@ bool decryptEmbeddedPayload(
 
     QByteArray keyBytes;
     if (base64Key) {
-        const QByteArray hexKey = QByteArray::fromBase64(encodedKey.toLatin1());
-        if (hexKey.toBase64() != encodedKey.toLatin1()
-            || hexKey.size() % 2 != 0
+        const QByteArray encodedBytes = QByteArray::fromBase64(encodedKey.toLatin1());
+        if (encodedBytes.toBase64() != encodedKey.toLatin1()) {
+            return false;
+        }
+
+        QByteArray hexKey = encodedBytes;
+        for (int i = 0; i < hexKey.size(); ++i) {
+            hexKey[i] = static_cast<char>(
+                static_cast<unsigned char>(hexKey.at(i))
+                ^ static_cast<unsigned char>(start)
+            );
+        }
+        if (hexKey.size() % 2 != 0
             || QByteArray::fromHex(hexKey).toHex() != hexKey.toLower()) {
             return false;
         }
         keyBytes = QByteArray::fromHex(hexKey);
+        if (startIndexForKey(keyBytes) != start) {
+            return false;
+        }
     } else {
         keyBytes = QByteArray::fromHex(encodedKey.toLatin1());
         if (keyBytes.toHex() != encodedKey.toLatin1().toLower()) {
@@ -477,11 +494,20 @@ PayloadBundle buildPayload(
     const QByteArray plaintextBytes = plaintext.toUtf8();
     const QByteArray encryptedBytes = encryptWithSalt(plaintextBytes, saltBytes);
     const QByteArray hexKey = saltBytes.toHex();
+    const int start = startIndexForKey(saltBytes);
+    QByteArray obfuscatedHexKey = hexKey;
+    if (base64Key) {
+        for (int i = 0; i < obfuscatedHexKey.size(); ++i) {
+            obfuscatedHexKey[i] = static_cast<char>(
+                static_cast<unsigned char>(obfuscatedHexKey.at(i))
+                ^ static_cast<unsigned char>(start)
+            );
+        }
+    }
     const QString encodedSalt = QString::fromLatin1(
-        base64Key ? hexKey.toBase64() : hexKey
+        base64Key ? obfuscatedHexKey.toBase64() : hexKey
     );
     const QString encodedText = QString::fromLatin1(encryptedBytes.toBase64());
-    const int start = startIndexForKey(saltBytes);
     const QString embedded = chunkedLayout
         ? weaveKeyInChunks(encodedText, encodedSalt, start)
         : weaveKey(encodedText, encodedSalt, start, false);
@@ -578,12 +604,22 @@ QString SaltedFibonacciCipher::encryptTaggedSegmentForTag(
     if (segment.isEmpty()) {
         const QByteArray keyBytes = params.value(0, QStringLiteral("tezcrypt")).toUtf8();
         const QByteArray hexKey = keyBytes.toHex();
+        QByteArray obfuscatedHexKey = hexKey;
+        const int start = startIndexForKey(keyBytes);
+        if (wrappedLayout) {
+            for (int i = 0; i < obfuscatedHexKey.size(); ++i) {
+                obfuscatedHexKey[i] = static_cast<char>(
+                    static_cast<unsigned char>(obfuscatedHexKey.at(i))
+                    ^ static_cast<unsigned char>(start)
+                );
+            }
+        }
         const QString encodedKey = QString::fromLatin1(
-            wrappedLayout ? hexKey.toBase64() : hexKey
+            wrappedLayout ? obfuscatedHexKey.toBase64() : hexKey
         );
         trailerParams = QStringLiteral("%1,%2,%3")
             .arg(EncryptionAlgorithm::TAGGED_FORMAT_VERSION)
-            .arg(startIndexForKey(keyBytes))
+            .arg(start)
             .arg(encodedKey.size());
         return {};
     }
