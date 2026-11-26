@@ -201,9 +201,13 @@ class SaltedFibonacciCipher {
         if (!segment) {
             const keyBytes = new TextEncoder().encode(params[0] ?? "tezcrypt");
             const start = await this._startIndexForKey(keyBytes);
+            const hexKey = this._toHex(keyBytes);
+            const encodedKey = chunkedLayout
+                ? this._toBase64(new TextEncoder().encode(hexKey))
+                : hexKey;
             return {
                 ciphertext: "",
-                trailerParams: `${TAGGED_FORMAT_VERSION},${start},${keyBytes.length * 2}`
+                trailerParams: `${TAGGED_FORMAT_VERSION},${start},${encodedKey.length}`
             };
         }
         const payload = await this._buildPayload(segment, params[0] ?? "tezcrypt", chunkedLayout);
@@ -267,6 +271,7 @@ class SaltedFibonacciCipher {
             false,
             version === 1 && tag.toUpperCase() !== "XFB"
                 && !(params.length === 3 && params[2] === "W"),
+            tag.toUpperCase() === "XFB",
             tag.toUpperCase() === "XFB"
         );
     }
@@ -275,7 +280,10 @@ class SaltedFibonacciCipher {
         const keyBytes = new TextEncoder().encode(key);
         const plaintextBytes = new TextEncoder().encode(plaintext);
         const encryptedBytes = await this._xorWithKey(plaintextBytes, keyBytes);
-        const encodedKey = this._toHex(keyBytes);
+        const hexKey = this._toHex(keyBytes);
+        const encodedKey = chunkedLayout
+            ? this._toBase64(new TextEncoder().encode(hexKey))
+            : hexKey;
         const encodedText = this._toBase64(encryptedBytes);
         const start = await this._startIndexForKey(keyBytes);
         return {
@@ -316,7 +324,8 @@ class SaltedFibonacciCipher {
         keyLength,
         verifyStart = false,
         legacyLayout = false,
-        chunkedLayout = false
+        chunkedLayout = false,
+        base64Key = false
     ) {
         if (!Number.isInteger(start) || !Number.isInteger(keyLength)
             || start < 0 || start >= 12 || keyLength < 0 || keyLength > payload.length
@@ -332,10 +341,25 @@ class SaltedFibonacciCipher {
             chunkedLayout
         );
         if (!/^(?:[0-9a-f]{2})*$/i.test(encodedKey)) {
-            return verifyStart ? null : payload;
+            if (!base64Key) {
+                return verifyStart ? null : payload;
+            }
         }
 
-        const keyBytes = this._fromHex(encodedKey);
+        let keyBytes;
+        if (base64Key) {
+            const hexBytes = this._fromBase64(encodedKey);
+            if (!hexBytes || this._toBase64(hexBytes) !== encodedKey) {
+                return verifyStart ? null : payload;
+            }
+            const hexKey = new TextDecoder("ascii", { fatal: true }).decode(hexBytes);
+            if (!/^(?:[0-9a-f]{2})*$/i.test(hexKey)) {
+                return verifyStart ? null : payload;
+            }
+            keyBytes = this._fromHex(hexKey);
+        } else {
+            keyBytes = this._fromHex(encodedKey);
+        }
         const encryptedBytes = this._fromBase64(encodedText);
         if (!keyBytes || !encryptedBytes
             || (verifyStart && await this._startIndexForKey(keyBytes) !== start)) {

@@ -5,7 +5,8 @@
 
 /**
  * Demonstration cipher that encrypts with a user-supplied key and weaves its
- * recoverable hex encoding into the output using Fibonacci-spaced positions.
+ * recoverable key encoding into the output using Fibonacci-spaced positions.
+ * Variant A uses hex; variant B uses Base64 and chunked placement.
  * Because the key is embedded, this provides obfuscation, not secure encryption.
  */
 class SaltedFibonacciCipher : public EncryptionAlgorithm {

@@ -307,7 +307,8 @@ bool decryptEmbeddedPayload(
     int encodedKeyLength,
     bool legacyLayout,
     QString& plaintext,
-    bool chunkedLayout = false
+    bool chunkedLayout = false,
+    bool base64Key = false
 ) {
     QString encodedText;
     QString encodedKey;
@@ -322,9 +323,20 @@ bool decryptEmbeddedPayload(
         return false;
     }
 
-    const QByteArray keyBytes = QByteArray::fromHex(encodedKey.toLatin1());
-    if (keyBytes.toHex() != encodedKey.toLatin1().toLower()) {
-        return false;
+    QByteArray keyBytes;
+    if (base64Key) {
+        const QByteArray hexKey = QByteArray::fromBase64(encodedKey.toLatin1());
+        if (hexKey.toBase64() != encodedKey.toLatin1()
+            || hexKey.size() % 2 != 0
+            || QByteArray::fromHex(hexKey).toHex() != hexKey.toLower()) {
+            return false;
+        }
+        keyBytes = QByteArray::fromHex(hexKey);
+    } else {
+        keyBytes = QByteArray::fromHex(encodedKey.toLatin1());
+        if (keyBytes.toHex() != encodedKey.toLatin1().toLower()) {
+            return false;
+        }
     }
 
     const QByteArray encryptedBytes = QByteArray::fromBase64(encodedText.toLatin1());
@@ -455,11 +467,19 @@ struct PayloadBundle {
     int encodedKeyLength;
 };
 
-PayloadBundle buildPayload(const QString& plaintext, const QString& key, bool chunkedLayout = false) {
+PayloadBundle buildPayload(
+    const QString& plaintext,
+    const QString& key,
+    bool chunkedLayout = false,
+    bool base64Key = false
+) {
     const QByteArray saltBytes = key.toUtf8();
     const QByteArray plaintextBytes = plaintext.toUtf8();
     const QByteArray encryptedBytes = encryptWithSalt(plaintextBytes, saltBytes);
-    const QString encodedSalt = QString::fromLatin1(saltBytes.toHex());
+    const QByteArray hexKey = saltBytes.toHex();
+    const QString encodedSalt = QString::fromLatin1(
+        base64Key ? hexKey.toBase64() : hexKey
+    );
     const QString encodedText = QString::fromLatin1(encryptedBytes.toBase64());
     const int start = startIndexForKey(saltBytes);
     const QString embedded = chunkedLayout
@@ -557,15 +577,19 @@ QString SaltedFibonacciCipher::encryptTaggedSegmentForTag(
     const bool wrappedLayout = tag.compare(QStringLiteral("XFB"), Qt::CaseInsensitive) == 0;
     if (segment.isEmpty()) {
         const QByteArray keyBytes = params.value(0, QStringLiteral("tezcrypt")).toUtf8();
+        const QByteArray hexKey = keyBytes.toHex();
+        const QString encodedKey = QString::fromLatin1(
+            wrappedLayout ? hexKey.toBase64() : hexKey
+        );
         trailerParams = QStringLiteral("%1,%2,%3")
             .arg(EncryptionAlgorithm::TAGGED_FORMAT_VERSION)
             .arg(startIndexForKey(keyBytes))
-            .arg(keyBytes.toHex().size());
+            .arg(encodedKey.size());
         return {};
     }
 
     const QString key = params.value(0, QStringLiteral("tezcrypt"));
-    const PayloadBundle payload = buildPayload(segment, key, wrappedLayout);
+    const PayloadBundle payload = buildPayload(segment, key, wrappedLayout, wrappedLayout);
     trailerParams = QStringLiteral("%1,%2")
         .arg(EncryptionAlgorithm::TAGGED_FORMAT_VERSION)
         .arg(trailerParameters(payload));
@@ -618,6 +642,7 @@ QString SaltedFibonacciCipher::decryptTaggedSegmentForTag(
                     encodedKeyLength,
                     version == 1 && !wrappedLayout,
                     plaintext,
+                    tag.compare(QStringLiteral("XFB"), Qt::CaseInsensitive) == 0,
                     tag.compare(QStringLiteral("XFB"), Qt::CaseInsensitive) == 0)) {
                 return plaintext;
             }
