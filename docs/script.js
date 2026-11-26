@@ -139,14 +139,17 @@ class SaltedFibonacciCipher {
         return "XFA";
     }
 
+    metadataTagVariants() {
+        return ["XFA", "XFB"];
+    }
+
     parameterPlaceholder() {
         return "key";
     }
 
     async encrypt(plaintext) {
         const payload = await this._buildPayload(plaintext, "tezcrypt");
-        const variantMarker = payload.wrappedLayout ? "W:" : "";
-        return `${TAGGED_FORMAT_VERSION}:${payload.start}:${payload.keyLength}:${variantMarker}${payload.body}`;
+        return `${TAGGED_FORMAT_VERSION}:${payload.start}:${payload.keyLength}:${payload.body}`;
     }
 
     async decrypt(ciphertext) {
@@ -158,7 +161,7 @@ class SaltedFibonacciCipher {
                 Number(legacyStandalone[1]),
                 Number(legacyStandalone[2]),
                 false,
-                false
+                true
             );
         }
 
@@ -170,7 +173,7 @@ class SaltedFibonacciCipher {
                 Number(standalone[2]),
                 Number(standalone[3]),
                 false,
-                standalone[1] === "2" || Boolean(standalone[4])
+                standalone[1] === "1" && !standalone[4]
             );
         }
 
@@ -190,20 +193,23 @@ class SaltedFibonacciCipher {
     }
 
     async encryptTaggedSegment(segment, params = []) {
+        return this.encryptTaggedSegmentForTag(segment, params, this.metadataTag());
+    }
+
+    async encryptTaggedSegmentForTag(segment, params = [], tag) {
+        const chunkedLayout = tag.toUpperCase() === "XFB";
         if (!segment) {
             const keyBytes = new TextEncoder().encode(params[0] ?? "tezcrypt");
             const start = await this._startIndexForKey(keyBytes);
             return {
                 ciphertext: "",
                 trailerParams: `${TAGGED_FORMAT_VERSION},${start},${keyBytes.length * 2}`
-                    + (keyBytes.length > 0 ? ",W" : "")
             };
         }
-        const payload = await this._buildPayload(segment, params[0] ?? "tezcrypt");
+        const payload = await this._buildPayload(segment, params[0] ?? "tezcrypt", chunkedLayout);
         return {
             ciphertext: payload.body,
             trailerParams: `${TAGGED_FORMAT_VERSION},${payload.start},${payload.keyLength}`
-                + (payload.wrappedLayout ? ",W" : "")
         };
     }
 
@@ -236,13 +242,18 @@ class SaltedFibonacciCipher {
                 Number(params[1]),
                 Number(params[2]),
                 false,
-                params[0] === "2" || (params.length === 4 && params[3] === "W")
+                params[0] !== "2" && params[0] !== "SF1"
+                    && !(params.length === 4 && params[3] === "W")
             );
         }
         return segment;
     }
 
     async decryptTaggedSegment(segment, params, version) {
+        return this.decryptTaggedSegmentForTag(segment, params, version, this.metadataTag());
+    }
+
+    async decryptTaggedSegmentForTag(segment, params, version, tag) {
         if ((params.length !== 2 && params.length !== 3) || (version !== 1 && version !== 2)) {
             return segment;
         }
@@ -254,23 +265,25 @@ class SaltedFibonacciCipher {
             Number(params[0]),
             Number(params[1]),
             false,
-            version === 2 || (params.length === 3 && params[2] === "W")
+            version === 1 && tag.toUpperCase() !== "XFB"
+                && !(params.length === 3 && params[2] === "W"),
+            tag.toUpperCase() === "XFB"
         );
     }
 
-    async _buildPayload(plaintext, key) {
+    async _buildPayload(plaintext, key, chunkedLayout = false) {
         const keyBytes = new TextEncoder().encode(key);
         const plaintextBytes = new TextEncoder().encode(plaintext);
         const encryptedBytes = await this._xorWithKey(plaintextBytes, keyBytes);
         const encodedKey = this._toHex(keyBytes);
         const encodedText = this._toBase64(encryptedBytes);
         const start = await this._startIndexForKey(keyBytes);
-        const wrappedLayout = encodedKey.length > encodedText.length;
         return {
-            body: this._weaveKey(encodedText, encodedKey, start, wrappedLayout),
+            body: chunkedLayout
+                ? this._weaveKeyInChunks(encodedText, encodedKey, start)
+                : this._weaveKey(encodedText, encodedKey, start, false),
             start,
-            keyLength: encodedKey.length,
-            wrappedLayout
+            keyLength: encodedKey.length
         };
     }
 
@@ -302,7 +315,8 @@ class SaltedFibonacciCipher {
         start,
         keyLength,
         verifyStart = false,
-        legacyLayout = false
+        legacyLayout = false,
+        chunkedLayout = false
     ) {
         if (!Number.isInteger(start) || !Number.isInteger(keyLength)
             || start < 0 || start >= 12 || keyLength < 0 || keyLength > payload.length
@@ -314,7 +328,8 @@ class SaltedFibonacciCipher {
             payload,
             start,
             keyLength,
-            legacyLayout
+            legacyLayout,
+            chunkedLayout
         );
         if (!/^(?:[0-9a-f]{2})*$/i.test(encodedKey)) {
             return verifyStart ? null : payload;
@@ -399,6 +414,48 @@ class SaltedFibonacciCipher {
         return positions.sort((a, b) => a - b);
     }
 
+    _buildChunkPositions(baseLength, keyLength, start) {
+        const positions = [];
+        let position = start;
+        let first = 1;
+        let second = 1;
+
+        while (positions.length < keyLength) {
+            position += first;
+            if (position >= baseLength) {
+                break;
+            }
+            positions.push(position);
+            const next = Math.min(baseLength, first + second);
+            first = second;
+            second = next;
+        }
+        return positions;
+    }
+
+    _weaveKeyInChunks(text, key, start) {
+        const positions = this._buildChunkPositions(text.length, key.length, start);
+        if (positions.length < 2) {
+            return text + key;
+        }
+
+        const chunkSize = Math.ceil(key.length / positions.length);
+        let result = "";
+        let keyIndex = 0;
+        let chunkIndex = 0;
+
+        for (let textIndex = 0; textIndex < text.length; textIndex++) {
+            if (chunkIndex < positions.length && positions[chunkIndex] === textIndex) {
+                const currentChunkSize = Math.min(chunkSize, key.length - keyIndex);
+                result += key.slice(keyIndex, keyIndex + currentChunkSize);
+                keyIndex += currentChunkSize;
+                chunkIndex++;
+            }
+            result += text[textIndex];
+        }
+        return result;
+    }
+
     _weaveKey(text, key, start, wrappedLayout) {
         const positions = wrappedLayout
             ? this._buildKeyPositions(text.length, key.length, start)
@@ -416,11 +473,32 @@ class SaltedFibonacciCipher {
         return result;
     }
 
-    _unweaveKey(payload, start, keyLength, wrappedLayout = false) {
+    _unweaveKey(payload, start, keyLength, legacyLayout = false, chunkedLayout = false) {
         const baseLength = payload.length - keyLength;
-        const positions = wrappedLayout
-            ? this._buildKeyPositions(baseLength, keyLength, start)
-            : this._buildLegacyKeyPositions(baseLength, keyLength, start);
+        if (chunkedLayout) {
+            const positions = this._buildChunkPositions(baseLength, keyLength, start);
+            if (positions.length < 2) {
+                return [payload.slice(0, baseLength), payload.slice(baseLength)];
+            }
+            const chunkSize = Math.ceil(keyLength / positions.length);
+            let text = "";
+            let key = "";
+            let payloadIndex = 0;
+            let chunkIndex = 0;
+            for (let textPosition = 0; textPosition < baseLength; textPosition++) {
+                if (chunkIndex < positions.length && positions[chunkIndex] === textPosition) {
+                    const currentChunkSize = Math.min(chunkSize, keyLength - key.length);
+                    key += payload.slice(payloadIndex, payloadIndex + currentChunkSize);
+                    payloadIndex += currentChunkSize;
+                    chunkIndex++;
+                }
+                text += payload[payloadIndex++];
+            }
+            return [text, key];
+        }
+        const positions = legacyLayout
+            ? this._buildLegacyKeyPositions(baseLength, keyLength, start)
+            : this._buildKeyPositions(baseLength, keyLength, start);
         let text = "";
         let key = "";
         let keyIndex = 0;
@@ -524,7 +602,7 @@ class WeaverSimpleA {
     }
 }
 
-function decryptVersionedSegment(algorithm, segment, trailerParams) {
+function decryptVersionedSegment(algorithm, segment, trailerParams, algorithmTag) {
     const expectedCount = typeof algorithm.trailerParameterCount === "function"
         ? algorithm.trailerParameterCount()
         : 0;
@@ -540,6 +618,14 @@ function decryptVersionedSegment(algorithm, segment, trailerParams) {
         const version = Number(params[0]);
         if (version !== 1 && version !== 2) {
             return segment;
+        }
+        if (typeof algorithm.decryptTaggedSegmentForTag === "function") {
+            return algorithm.decryptTaggedSegmentForTag(
+                segment,
+                params.slice(1),
+                version,
+                algorithmTag
+            );
         }
         if (typeof algorithm.decryptTaggedSegment === "function") {
             return algorithm.decryptTaggedSegment(segment, params.slice(1), version);
@@ -567,10 +653,16 @@ class AlgorithmRegistry {
 
     buildTagMap() {
         return Object.values(this.algorithms).reduce((map, algo) => {
-            if (algo && typeof algo.metadataTag === 'function') {
-                const tag = algo.metadataTag();
-                if (tag) {
-                    map[tag] = algo;
+            if (algo) {
+                const tags = typeof algo.metadataTagVariants === "function"
+                    ? algo.metadataTagVariants()
+                    : typeof algo.metadataTag === "function"
+                        ? [algo.metadataTag()]
+                        : [];
+                for (const tag of tags) {
+                    if (tag) {
+                        map[tag] = algo;
+                    }
                 }
                 if (typeof algo.legacyMetadataTags === "function") {
                     for (const legacyTag of algo.legacyMetadataTags()) {
@@ -691,27 +783,35 @@ class TezCryptWeb {
 
     populateTagOptions() {
         const algorithm = this.registry.getAlgorithm(this.currentAlgorithmId);
-        const tag = algorithm && typeof algorithm.metadataTag === "function"
-            ? algorithm.metadataTag()
+        const tags = algorithm && typeof algorithm.metadataTagVariants === "function"
+            ? algorithm.metadataTagVariants()
+            : algorithm && typeof algorithm.metadataTag === "function"
+                ? [algorithm.metadataTag()]
             : "";
         const subAlgorithmLabels = { S: "Simple", F: "Fibonacci", X: "XOR" };
 
         this.elements.subAlgorithm.innerHTML = "";
         this.elements.variant.innerHTML = "";
-        if (tag.length < 3) {
+        if (tags.length === 0 || tags[0].length < 3) {
             return;
         }
 
+        const tag = tags[0];
         const subAlgorithmCode = tag[1];
         const subAlgorithmOption = document.createElement("option");
         subAlgorithmOption.value = subAlgorithmCode;
         subAlgorithmOption.textContent = subAlgorithmLabels[subAlgorithmCode] || subAlgorithmCode;
         this.elements.subAlgorithm.appendChild(subAlgorithmOption);
 
-        const variantOption = document.createElement("option");
-        variantOption.value = tag[2];
-        variantOption.textContent = tag[2];
-        this.elements.variant.appendChild(variantOption);
+        for (const variantTag of tags) {
+            if (variantTag.length < 3 || variantTag.slice(0, 2) !== tag.slice(0, 2)) {
+                continue;
+            }
+            const variantOption = document.createElement("option");
+            variantOption.value = variantTag[2];
+            variantOption.textContent = variantTag[2];
+            this.elements.variant.appendChild(variantOption);
+        }
     }
 
     async performCrypto(isEncrypt) {
@@ -755,7 +855,14 @@ class TezCryptWeb {
             return;
         }
 
-        const algorithmTag = typeof algorithm.metadataTag === 'function' ? algorithm.metadataTag() : '';
+        const defaultTag = typeof algorithm.metadataTag === 'function' ? algorithm.metadataTag() : '';
+        const selectedVariant = this.elements.variant.value;
+        const variants = typeof algorithm.metadataTagVariants === "function"
+            ? algorithm.metadataTagVariants()
+            : [defaultTag];
+        const algorithmTag = variants.find(tag =>
+            tag.slice(0, 2) === defaultTag.slice(0, 2) && tag[2] === selectedVariant
+        ) || defaultTag;
         const params = typeof algorithm.parameterPlaceholder === 'function' ? algorithm.parameterPlaceholder() : '';
 
         if (!algorithmTag) {
@@ -866,7 +973,17 @@ class TezCryptWeb {
 
             let encryptedSegment;
             let trailerParams;
-            if (typeof algorithm.encryptTaggedSegment === "function") {
+            if (typeof algorithm.encryptTaggedSegmentForTag === "function") {
+                const encrypted = await algorithm.encryptTaggedSegmentForTag(
+                    segment,
+                    params,
+                    algorithmTag
+                );
+                encryptedSegment = encrypted.ciphertext;
+                trailerParams = encrypted.trailerParams
+                    ? encrypted.trailerParams.split(',')
+                    : [];
+            } else if (typeof algorithm.encryptTaggedSegment === "function") {
                 const encrypted = await algorithm.encryptTaggedSegment(segment, params);
                 encryptedSegment = encrypted.ciphertext;
                 trailerParams = encrypted.trailerParams
@@ -953,7 +1070,12 @@ class TezCryptWeb {
             }
 
             const segment = result.slice(range.start, range.end);
-            const decryptedSegment = await decryptVersionedSegment(algorithm, segment, range.params);
+            const decryptedSegment = await decryptVersionedSegment(
+                algorithm,
+                segment,
+                range.params,
+                range.algorithmTag
+            );
             result = result.slice(0, range.start) + decryptedSegment + result.slice(range.end);
         }
 

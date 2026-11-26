@@ -57,6 +57,10 @@ public:
         return id().toUpper();
     }
 
+    virtual QStringList metadataTagVariants() const {
+        return {metadataTag()};
+    }
+
     virtual QStringList legacyMetadataTags() const {
         return {};
     }
@@ -121,6 +125,16 @@ public:
         return encrypted;
     }
 
+    virtual QString encryptTaggedSegmentForTag(
+        const QString& segment,
+        const QStringList& params,
+        const QString& tag,
+        QString& trailerParams
+    ) const {
+        Q_UNUSED(tag);
+        return encryptTaggedSegment(segment, params, trailerParams);
+    }
+
     /**
      * @brief Decrypts a tagged segment, consuming the shared format version.
      * Trailers without a recognized version are passed through unchanged for
@@ -138,6 +152,15 @@ public:
             }
         }
         return decryptSegment(segment, params);
+    }
+
+    virtual QString decryptTaggedSegmentForTag(
+        const QString& segment,
+        const QStringList& params,
+        const QString& tag
+    ) const {
+        Q_UNUSED(tag);
+        return decryptTaggedSegment(segment, params);
     }
 
     /**

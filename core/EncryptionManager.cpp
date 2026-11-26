@@ -5,9 +5,11 @@
 void EncryptionManager::registerAlgorithm(EncryptionAlgorithmPtr algorithm) {
     if (algorithm) {
         m_algorithms[algorithm->id().toStdString()] = algorithm;
-        const QString tag = algorithm->metadataTag().toLower();
-        if (!tag.isEmpty()) {
-            m_algorithmTags[tag.toStdString()] = algorithm;
+        for (const QString& tag : algorithm->metadataTagVariants()) {
+            const QString normalizedTag = tag.toLower();
+            if (!normalizedTag.isEmpty()) {
+                m_algorithmTags[normalizedTag.toStdString()] = algorithm;
+            }
         }
         for (const QString& legacyTag : algorithm->legacyMetadataTags()) {
             const QString normalizedTag = legacyTag.toLower();
@@ -108,7 +110,12 @@ QString EncryptionManager::encryptTaggedText(const QString& plaintext) const {
         }
 
         QString trailerParameter;
-        QString encryptedSegment = algorithm->encryptTaggedSegment(segment, parameters, trailerParameter);
+        QString encryptedSegment = algorithm->encryptTaggedSegmentForTag(
+            segment,
+            parameters,
+            algorithmTag,
+            trailerParameter
+        );
         int segmentStart = result.size();
         result += encryptedSegment;
         int segmentEnd = result.size();
@@ -192,7 +199,11 @@ QString EncryptionManager::decryptTaggedText(const QString& ciphertext) const {
         }
 
         QString segment = result.mid(taggedRange.start, taggedRange.end - taggedRange.start);
-        QString decryptedSegment = algorithm->decryptTaggedSegment(segment, taggedRange.params);
+        QString decryptedSegment = algorithm->decryptTaggedSegmentForTag(
+            segment,
+            taggedRange.params,
+            taggedRange.algorithmTag
+        );
         result.replace(taggedRange.start, taggedRange.end - taggedRange.start, decryptedSegment);
     }
 

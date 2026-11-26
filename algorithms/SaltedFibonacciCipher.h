@@ -13,6 +13,7 @@ public:
     QString name() const override;
     QString id() const override;
     QString metadataTag() const override;
+    QStringList metadataTagVariants() const override;
     QString parameterPlaceholder() const override;
     QString encrypt(const QString& plaintext) const override;
     QString decrypt(const QString& ciphertext) const override;
@@ -22,7 +23,18 @@ public:
         const QStringList& params,
         QString& trailerParams
     ) const override;
+    QString encryptTaggedSegmentForTag(
+        const QString& segment,
+        const QStringList& params,
+        const QString& tag,
+        QString& trailerParams
+    ) const override;
     QString decryptTaggedSegment(const QString& segment, const QStringList& params) const override;
+    QString decryptTaggedSegmentForTag(
+        const QString& segment,
+        const QStringList& params,
+        const QString& tag
+    ) const override;
     QString decryptSegment(const QString& segment, const QStringList& params) const override;
     QString trailerParameter(const QString& segment, const QStringList& params) const override;
     int trailerParameterCount() const override;

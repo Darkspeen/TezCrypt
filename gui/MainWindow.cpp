@@ -210,8 +210,9 @@ void MainWindow::onAlgorithmSelectionChanged(int /*index*/) {
         return;
     }
 
-    const QString tag = selectedAlgorithm->metadataTag();
-    if (tag.size() >= 3) {
+    const QStringList tags = selectedAlgorithm->metadataTagVariants();
+    if (!tags.isEmpty() && tags.first().size() >= 3) {
+        const QString tag = tags.first();
         const QChar subAlgorithmCode = tag.at(1);
         const QString subAlgorithm = subAlgorithmCode == QLatin1Char('S')
             ? QStringLiteral("Simple")
@@ -221,7 +222,11 @@ void MainWindow::onAlgorithmSelectionChanged(int /*index*/) {
                     ? QStringLiteral("XOR")
                 : QString(subAlgorithmCode);
         m_subAlgorithmCombo->addItem(subAlgorithm);
-        m_variantCombo->addItem(QString(tag.at(2)));
+        for (const QString& variantTag : tags) {
+            if (variantTag.size() >= 3 && variantTag.left(2) == tag.left(2)) {
+                m_variantCombo->addItem(QString(variantTag.at(2)));
+            }
+        }
     }
 }
 
@@ -245,6 +250,14 @@ void MainWindow::onWrapTagClicked() {
     }
 
     QString selectedTag = selectedAlgorithm->metadataTag();
+    const QString selectedVariant = m_variantCombo->currentText();
+    for (const QString& variantTag : selectedAlgorithm->metadataTagVariants()) {
+        if (variantTag.size() >= 3 && variantTag.left(2) == selectedTag.left(2)
+            && QString(variantTag.at(2)) == selectedVariant) {
+            selectedTag = variantTag;
+            break;
+        }
+    }
     QString params = selectedAlgorithm->parameterPlaceholder();
     QString wrappingPrefix = params.isEmpty()
         ? QStringLiteral("|#%1|").arg(selectedTag)

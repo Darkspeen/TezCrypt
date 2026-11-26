@@ -157,6 +157,64 @@ QVector<int> buildKeyPositions(int baseLength, int keyLength, int start) {
     return positions;
 }
 
+QVector<int> buildChunkPositions(int baseLength, int keyLength, int start) {
+    QVector<int> positions;
+    qint64 position = start;
+    qint64 first = 1;
+    qint64 second = 1;
+
+    while (positions.size() < keyLength) {
+        position += first;
+        if (position >= baseLength) {
+            break;
+        }
+        positions.append(static_cast<int>(position));
+
+        const qint64 next = std::min<qint64>(baseLength, first + second);
+        first = second;
+        second = next;
+    }
+
+    return positions;
+}
+
+int chunkLength(int keyLength, int chunkCount) {
+    return keyLength / chunkCount + (keyLength % chunkCount != 0);
+}
+
+QString weaveKeyInChunks(const QString& encodedText, const QString& encodedKey, int start) {
+    const QVector<int> positions = buildChunkPositions(
+        encodedText.size(),
+        encodedKey.size(),
+        start
+    );
+    if (positions.size() < 2) {
+        return encodedText + encodedKey;
+    }
+
+    QString result;
+    result.reserve(encodedText.size() + encodedKey.size());
+    int textIndex = 0;
+    int keyIndex = 0;
+    int chunkIndex = 0;
+    const int chunkSize = chunkLength(encodedKey.size(), positions.size());
+
+    for (int position = 0; position < encodedText.size(); ++position) {
+        if (chunkIndex < positions.size() && positions.at(chunkIndex) == position) {
+            const int currentChunkSize = std::min(
+                chunkSize,
+                static_cast<int>(encodedKey.size()) - keyIndex
+            );
+            result.append(encodedKey.mid(keyIndex, currentChunkSize));
+            keyIndex += currentChunkSize;
+            ++chunkIndex;
+        }
+        result.append(encodedText.at(textIndex++));
+    }
+
+    return result;
+}
+
 QString weaveKey(
     const QString& encodedText,
     const QString& encodedKey,
@@ -188,6 +246,7 @@ bool unweaveKey(
     int encodedKeyLength,
     int start,
     bool legacyLayout,
+    bool chunkedLayout,
     QString& encodedText,
     QString& encodedKey
 ) {
@@ -197,6 +256,33 @@ bool unweaveKey(
     }
 
     const int baseLength = payload.size() - encodedKeyLength;
+    if (chunkedLayout) {
+        const QVector<int> chunkPositions = buildChunkPositions(baseLength, encodedKeyLength, start);
+        if (chunkPositions.size() < 2) {
+            encodedText = payload.left(baseLength);
+            encodedKey = payload.mid(baseLength);
+            return true;
+        }
+
+        const int chunkSize = chunkLength(encodedKeyLength, chunkPositions.size());
+        int payloadIndex = 0;
+        int chunkIndex = 0;
+        for (int textPosition = 0; textPosition < baseLength; ++textPosition) {
+            if (chunkIndex < chunkPositions.size()
+                && chunkPositions.at(chunkIndex) == textPosition) {
+                const int currentChunkSize = std::min(
+                    chunkSize,
+                    encodedKeyLength - static_cast<int>(encodedKey.size())
+                );
+                encodedKey.append(payload.mid(payloadIndex, currentChunkSize));
+                payloadIndex += currentChunkSize;
+                ++chunkIndex;
+            }
+            encodedText.append(payload.at(payloadIndex++));
+        }
+        return chunkIndex == chunkPositions.size() && encodedKey.size() == encodedKeyLength;
+    }
+
     const QVector<int> positions = legacyLayout
         ? buildLegacyKeyPositions(baseLength, encodedKeyLength, start)
         : buildKeyPositions(baseLength, encodedKeyLength, start);
@@ -220,11 +306,19 @@ bool decryptEmbeddedPayload(
     int start,
     int encodedKeyLength,
     bool legacyLayout,
-    QString& plaintext
+    QString& plaintext,
+    bool chunkedLayout = false
 ) {
     QString encodedText;
     QString encodedKey;
-    if (!unweaveKey(payload, encodedKeyLength, start, legacyLayout, encodedText, encodedKey)) {
+    if (!unweaveKey(
+            payload,
+            encodedKeyLength,
+            start,
+            legacyLayout,
+            chunkedLayout,
+            encodedText,
+            encodedKey)) {
         return false;
     }
 
@@ -254,7 +348,14 @@ bool decryptDerivedEmbeddedPayload(
     for (int start = 0; start < 12; ++start) {
         QString encodedText;
         QString encodedKey;
-        if (!unweaveKey(payload, encodedKeyLength, start, true, encodedText, encodedKey)) {
+        if (!unweaveKey(
+                payload,
+                encodedKeyLength,
+                start,
+                true,
+                false,
+                encodedText,
+                encodedKey)) {
             continue;
         }
 
@@ -352,19 +453,19 @@ struct PayloadBundle {
     QString body;
     int start;
     int encodedKeyLength;
-    bool wrappedLayout;
 };
 
-PayloadBundle buildPayload(const QString& plaintext, const QString& key) {
+PayloadBundle buildPayload(const QString& plaintext, const QString& key, bool chunkedLayout = false) {
     const QByteArray saltBytes = key.toUtf8();
     const QByteArray plaintextBytes = plaintext.toUtf8();
     const QByteArray encryptedBytes = encryptWithSalt(plaintextBytes, saltBytes);
     const QString encodedSalt = QString::fromLatin1(saltBytes.toHex());
     const QString encodedText = QString::fromLatin1(encryptedBytes.toBase64());
     const int start = startIndexForKey(saltBytes);
-    const bool wrappedLayout = encodedSalt.size() > encodedText.size();
-    const QString embedded = weaveKey(encodedText, encodedSalt, start, wrappedLayout);
-    return {embedded, start, static_cast<int>(encodedSalt.size()), wrappedLayout};
+    const QString embedded = chunkedLayout
+        ? weaveKeyInChunks(encodedText, encodedSalt, start)
+        : weaveKey(encodedText, encodedSalt, start, false);
+    return {embedded, start, static_cast<int>(encodedSalt.size())};
 }
 
 QString trailerParameters(const PayloadBundle& payload) {
@@ -408,17 +509,20 @@ QString SaltedFibonacciCipher::metadataTag() const {
     return QStringLiteral("XFA");
 }
 
+QStringList SaltedFibonacciCipher::metadataTagVariants() const {
+    return {QStringLiteral("XFA"), QStringLiteral("XFB")};
+}
+
 QString SaltedFibonacciCipher::parameterPlaceholder() const {
     return QStringLiteral("key");
 }
 
 QString SaltedFibonacciCipher::encrypt(const QString& plaintext) const {
     const PayloadBundle payload = buildPayload(plaintext, QStringLiteral("tezcrypt"));
-    return QStringLiteral("%1:%2:%3:%4%5")
+    return QStringLiteral("%1:%2:%3:%4")
         .arg(EncryptionAlgorithm::TAGGED_FORMAT_VERSION)
         .arg(payload.start)
         .arg(payload.encodedKeyLength)
-        .arg(payload.wrappedLayout ? QStringLiteral("W:") : QString())
         .arg(payload.body);
 }
 
@@ -441,24 +545,30 @@ QString SaltedFibonacciCipher::encryptTaggedSegment(
     const QStringList& params,
     QString& trailerParams
 ) const {
+    return encryptTaggedSegmentForTag(segment, params, metadataTag(), trailerParams);
+}
+
+QString SaltedFibonacciCipher::encryptTaggedSegmentForTag(
+    const QString& segment,
+    const QStringList& params,
+    const QString& tag,
+    QString& trailerParams
+) const {
+    const bool wrappedLayout = tag.compare(QStringLiteral("XFB"), Qt::CaseInsensitive) == 0;
     if (segment.isEmpty()) {
         const QByteArray keyBytes = params.value(0, QStringLiteral("tezcrypt")).toUtf8();
         trailerParams = QStringLiteral("%1,%2,%3")
             .arg(EncryptionAlgorithm::TAGGED_FORMAT_VERSION)
             .arg(startIndexForKey(keyBytes))
             .arg(keyBytes.toHex().size());
-        if (!keyBytes.isEmpty()) {
-            trailerParams += QStringLiteral(",W");
-        }
         return {};
     }
 
     const QString key = params.value(0, QStringLiteral("tezcrypt"));
-    const PayloadBundle payload = buildPayload(segment, key);
-    trailerParams = QStringLiteral("%1,%2%3")
+    const PayloadBundle payload = buildPayload(segment, key, wrappedLayout);
+    trailerParams = QStringLiteral("%1,%2")
         .arg(EncryptionAlgorithm::TAGGED_FORMAT_VERSION)
-        .arg(trailerParameters(payload))
-        .arg(payload.wrappedLayout ? QStringLiteral(",W") : QString());
+        .arg(trailerParameters(payload));
     return payload.body;
 }
 
@@ -469,8 +579,7 @@ QString SaltedFibonacciCipher::trailerParameter(const QString& segment, const QS
 
     const QString key = params.value(0, QStringLiteral("tezcrypt"));
     const PayloadBundle payload = buildPayload(segment, key);
-    return trailerParameters(payload)
-        + (payload.wrappedLayout ? QStringLiteral(",W") : QString());
+    return trailerParameters(payload);
 }
 
 int SaltedFibonacciCipher::trailerParameterCount() const {
@@ -481,11 +590,14 @@ QString SaltedFibonacciCipher::decryptTaggedSegment(
     const QString& segment,
     const QStringList& params
 ) const {
-    if (params.size() == 4
-        && (params.at(0) != QStringLiteral("1") || params.at(3) != QStringLiteral("W"))) {
-        return segment;
-    }
+    return decryptTaggedSegmentForTag(segment, params, metadataTag());
+}
 
+QString SaltedFibonacciCipher::decryptTaggedSegmentForTag(
+    const QString& segment,
+    const QStringList& params,
+    const QString& tag
+) const {
     if (params.size() == 3 || params.size() == 4) {
         bool versionOk = false;
         bool startOk = false;
@@ -493,17 +605,20 @@ QString SaltedFibonacciCipher::decryptTaggedSegment(
         const int version = params.at(0).toInt(&versionOk);
         const int start = params.at(1).toInt(&startOk);
         const int encodedKeyLength = params.at(2).toInt(&keyLengthOk);
-        const bool wrappedLayout = version == 2
-            || (version == 1 && params.size() == 4 && params.at(3) == QStringLiteral("W"));
+        const bool legacyWrappedMarker = params.size() == 4 && params.at(3) == QStringLiteral("W");
+        const bool wrappedLayout = tag.compare(QStringLiteral("XFB"), Qt::CaseInsensitive) == 0
+            || version == 2
+            || legacyWrappedMarker;
         if (versionOk && startOk && keyLengthOk && (version == 1 || version == 2)
-            && (params.size() == 3 || (version == 1 && wrappedLayout))) {
+            && (params.size() == 3 || legacyWrappedMarker)) {
             QString plaintext;
             if (decryptEmbeddedPayload(
                     segment,
                     start,
                     encodedKeyLength,
-                    !wrappedLayout,
-                    plaintext)) {
+                    version == 1 && !wrappedLayout,
+                    plaintext,
+                    tag.compare(QStringLiteral("XFB"), Qt::CaseInsensitive) == 0)) {
                 return plaintext;
             }
             return segment;
