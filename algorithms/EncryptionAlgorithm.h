@@ -131,7 +131,7 @@ public:
             bool versionOk = false;
             const int version = params.first().toInt(&versionOk);
             if (versionOk) {
-                if (version == TAGGED_FORMAT_VERSION) {
+                if (version == 1 || version == 2) {
                     return decryptSegment(segment, params.mid(1));
                 }
                 return segment;

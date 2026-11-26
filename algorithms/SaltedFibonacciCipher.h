@@ -22,6 +22,7 @@ public:
         const QStringList& params,
         QString& trailerParams
     ) const override;
+    QString decryptTaggedSegment(const QString& segment, const QStringList& params) const override;
     QString decryptSegment(const QString& segment, const QStringList& params) const override;
     QString trailerParameter(const QString& segment, const QStringList& params) const override;
     int trailerParameterCount() const override;

@@ -142,7 +142,10 @@ QString DelimitedWeaverSimpleA::decrypt(const QString& ciphertext) const {
         QString algorithmTag = match.captured(3);
         QString parameterText = match.captured(4);
         QStringList params = parseParameters(parameterText);
-        if (!params.isEmpty() && params.first() == QString::number(TAGGED_FORMAT_VERSION)) {
+        if (!params.isEmpty()
+            && (params.first() == QString::number(TAGGED_FORMAT_VERSION)
+                || params.first() == QStringLiteral("1")
+                || params.first() == QStringLiteral("2"))) {
             params.removeFirst();
         }
 

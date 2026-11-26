@@ -106,7 +106,7 @@ SplitPayload splitEmbeddedPayload(const QString& encodedText, int saltLength, in
     return result;
 }
 
-QVector<int> buildKeyPositions(int baseLength, int keyLength, int start) {
+QVector<int> buildLegacyKeyPositions(int baseLength, int keyLength, int start) {
     QVector<int> positions;
     positions.reserve(keyLength);
 
@@ -127,10 +127,47 @@ QVector<int> buildKeyPositions(int baseLength, int keyLength, int start) {
     return positions;
 }
 
-QString weaveKey(const QString& encodedText, const QString& encodedKey, int start) {
+QVector<int> buildKeyPositions(int baseLength, int keyLength, int start) {
+    QVector<int> positions;
+    if (keyLength <= 0) {
+        return positions;
+    }
+
+    const int totalLength = baseLength + keyLength;
+    positions.reserve(keyLength);
+    QVector<bool> occupied(totalLength, false);
+    qint64 position = start % totalLength;
+    qint64 firstJump = 1;
+    qint64 secondJump = 1;
+
+    for (int i = 0; i < keyLength; ++i) {
+        while (occupied.at(static_cast<int>(position))) {
+            position = (position + 1) % totalLength;
+        }
+        positions.append(static_cast<int>(position));
+        occupied[static_cast<int>(position)] = true;
+
+        const qint64 jump = firstJump;
+        firstJump = secondJump;
+        secondJump = std::min<qint64>(totalLength, firstJump + secondJump);
+        position = (position + jump) % totalLength;
+    }
+
+    std::sort(positions.begin(), positions.end());
+    return positions;
+}
+
+QString weaveKey(
+    const QString& encodedText,
+    const QString& encodedKey,
+    int start,
+    bool wrappedLayout
+) {
     const int baseLength = encodedText.size();
     const int totalLength = baseLength + encodedKey.size();
-    const QVector<int> positions = buildKeyPositions(baseLength, encodedKey.size(), start);
+    const QVector<int> positions = wrappedLayout
+        ? buildKeyPositions(baseLength, encodedKey.size(), start)
+        : buildLegacyKeyPositions(baseLength, encodedKey.size(), start);
 
     QString result;
     result.reserve(totalLength);
@@ -150,6 +187,7 @@ bool unweaveKey(
     const QString& payload,
     int encodedKeyLength,
     int start,
+    bool legacyLayout,
     QString& encodedText,
     QString& encodedKey
 ) {
@@ -159,7 +197,9 @@ bool unweaveKey(
     }
 
     const int baseLength = payload.size() - encodedKeyLength;
-    const QVector<int> positions = buildKeyPositions(baseLength, encodedKeyLength, start);
+    const QVector<int> positions = legacyLayout
+        ? buildLegacyKeyPositions(baseLength, encodedKeyLength, start)
+        : buildKeyPositions(baseLength, encodedKeyLength, start);
     encodedText.reserve(baseLength);
     encodedKey.reserve(encodedKeyLength);
 
@@ -179,11 +219,12 @@ bool decryptEmbeddedPayload(
     const QString& payload,
     int start,
     int encodedKeyLength,
+    bool legacyLayout,
     QString& plaintext
 ) {
     QString encodedText;
     QString encodedKey;
-    if (!unweaveKey(payload, encodedKeyLength, start, encodedText, encodedKey)) {
+    if (!unweaveKey(payload, encodedKeyLength, start, legacyLayout, encodedText, encodedKey)) {
         return false;
     }
 
@@ -213,7 +254,7 @@ bool decryptDerivedEmbeddedPayload(
     for (int start = 0; start < 12; ++start) {
         QString encodedText;
         QString encodedKey;
-        if (!unweaveKey(payload, encodedKeyLength, start, encodedText, encodedKey)) {
+        if (!unweaveKey(payload, encodedKeyLength, start, true, encodedText, encodedKey)) {
             continue;
         }
 
@@ -235,9 +276,7 @@ bool decryptDerivedEmbeddedPayload(
 }
 
 bool decryptStandalonePayload(const QString& ciphertext, QString& plaintext) {
-    static const QRegularExpression legacyHeaderPattern(
-        QStringLiteral("^(?:1|SF1):(\\d+):(\\d+):")
-    );
+    static const QRegularExpression legacyHeaderPattern(QStringLiteral("^SF1:(\\d+):(\\d+):"));
     const auto legacyHeader = legacyHeaderPattern.match(ciphertext);
     if (legacyHeader.hasMatch()) {
         bool startOk = false;
@@ -251,20 +290,29 @@ bool decryptStandalonePayload(const QString& ciphertext, QString& plaintext) {
             ciphertext.mid(legacyHeader.capturedEnd()),
             start,
             encodedKeyLength,
+            true,
             plaintext
         );
     }
 
-    static const QRegularExpression currentHeaderPattern(QStringLiteral("^1:(\\d+):"));
+    static const QRegularExpression currentHeaderPattern(
+        QStringLiteral("^(1|2):(\\d+):(\\d+):(W:)?"));
     const auto currentHeader = currentHeaderPattern.match(ciphertext);
     if (!currentHeader.hasMatch()) {
         return false;
     }
+    bool versionOk = false;
+    const int version = currentHeader.captured(1).toInt(&versionOk);
+    bool startOk = false;
+    const int start = currentHeader.captured(2).toInt(&startOk);
     bool keyLengthOk = false;
-    const int encodedKeyLength = currentHeader.captured(1).toInt(&keyLengthOk);
-    return keyLengthOk && decryptDerivedEmbeddedPayload(
+    const int encodedKeyLength = currentHeader.captured(3).toInt(&keyLengthOk);
+    const bool wrappedLayout = version == 2 || !currentHeader.captured(4).isEmpty();
+    return versionOk && startOk && keyLengthOk && decryptEmbeddedPayload(
         ciphertext.mid(currentHeader.capturedEnd()),
+        start,
         encodedKeyLength,
+        !wrappedLayout,
         plaintext
     );
 }
@@ -304,6 +352,7 @@ struct PayloadBundle {
     QString body;
     int start;
     int encodedKeyLength;
+    bool wrappedLayout;
 };
 
 PayloadBundle buildPayload(const QString& plaintext, const QString& key) {
@@ -313,8 +362,9 @@ PayloadBundle buildPayload(const QString& plaintext, const QString& key) {
     const QString encodedSalt = QString::fromLatin1(saltBytes.toHex());
     const QString encodedText = QString::fromLatin1(encryptedBytes.toBase64());
     const int start = startIndexForKey(saltBytes);
-    const QString embedded = weaveKey(encodedText, encodedSalt, start);
-    return {embedded, start, static_cast<int>(encodedSalt.size())};
+    const bool wrappedLayout = encodedSalt.size() > encodedText.size();
+    const QString embedded = weaveKey(encodedText, encodedSalt, start, wrappedLayout);
+    return {embedded, start, static_cast<int>(encodedSalt.size()), wrappedLayout};
 }
 
 QString trailerParameters(const PayloadBundle& payload) {
@@ -364,9 +414,11 @@ QString SaltedFibonacciCipher::parameterPlaceholder() const {
 
 QString SaltedFibonacciCipher::encrypt(const QString& plaintext) const {
     const PayloadBundle payload = buildPayload(plaintext, QStringLiteral("tezcrypt"));
-    return QStringLiteral("1:%1:%2:%3")
+    return QStringLiteral("%1:%2:%3:%4%5")
+        .arg(EncryptionAlgorithm::TAGGED_FORMAT_VERSION)
         .arg(payload.start)
         .arg(payload.encodedKeyLength)
+        .arg(payload.wrappedLayout ? QStringLiteral("W:") : QString())
         .arg(payload.body);
 }
 
@@ -395,14 +447,18 @@ QString SaltedFibonacciCipher::encryptTaggedSegment(
             .arg(EncryptionAlgorithm::TAGGED_FORMAT_VERSION)
             .arg(startIndexForKey(keyBytes))
             .arg(keyBytes.toHex().size());
+        if (!keyBytes.isEmpty()) {
+            trailerParams += QStringLiteral(",W");
+        }
         return {};
     }
 
     const QString key = params.value(0, QStringLiteral("tezcrypt"));
     const PayloadBundle payload = buildPayload(segment, key);
-    trailerParams = QStringLiteral("%1,%2")
+    trailerParams = QStringLiteral("%1,%2%3")
         .arg(EncryptionAlgorithm::TAGGED_FORMAT_VERSION)
-        .arg(trailerParameters(payload));
+        .arg(trailerParameters(payload))
+        .arg(payload.wrappedLayout ? QStringLiteral(",W") : QString());
     return payload.body;
 }
 
@@ -412,39 +468,82 @@ QString SaltedFibonacciCipher::trailerParameter(const QString& segment, const QS
     }
 
     const QString key = params.value(0, QStringLiteral("tezcrypt"));
-    return trailerParameters(buildPayload(segment, key));
+    const PayloadBundle payload = buildPayload(segment, key);
+    return trailerParameters(payload)
+        + (payload.wrappedLayout ? QStringLiteral(",W") : QString());
 }
 
 int SaltedFibonacciCipher::trailerParameterCount() const {
     return 2;
 }
 
+QString SaltedFibonacciCipher::decryptTaggedSegment(
+    const QString& segment,
+    const QStringList& params
+) const {
+    if (params.size() == 4
+        && (params.at(0) != QStringLiteral("1") || params.at(3) != QStringLiteral("W"))) {
+        return segment;
+    }
+
+    if (params.size() == 3 || params.size() == 4) {
+        bool versionOk = false;
+        bool startOk = false;
+        bool keyLengthOk = false;
+        const int version = params.at(0).toInt(&versionOk);
+        const int start = params.at(1).toInt(&startOk);
+        const int encodedKeyLength = params.at(2).toInt(&keyLengthOk);
+        const bool wrappedLayout = version == 2
+            || (version == 1 && params.size() == 4 && params.at(3) == QStringLiteral("W"));
+        if (versionOk && startOk && keyLengthOk && (version == 1 || version == 2)
+            && (params.size() == 3 || (version == 1 && wrappedLayout))) {
+            QString plaintext;
+            if (decryptEmbeddedPayload(
+                    segment,
+                    start,
+                    encodedKeyLength,
+                    !wrappedLayout,
+                    plaintext)) {
+                return plaintext;
+            }
+            return segment;
+        }
+    }
+
+    return EncryptionAlgorithm::decryptTaggedSegment(segment, params);
+}
+
 QString SaltedFibonacciCipher::decryptSegment(const QString& segment, const QStringList& params) const {
     QString versionOnePlaintext;
-    if (segment.startsWith(QStringLiteral("1:")) || segment.startsWith(QStringLiteral("SF1:"))) {
+    if (segment.startsWith(QStringLiteral("1:")) || segment.startsWith(QStringLiteral("2:"))
+        || segment.startsWith(QStringLiteral("SF1:"))) {
         return decryptStandalonePayload(segment, versionOnePlaintext) ? versionOnePlaintext : segment;
     }
 
-    if (params.size() == 2) {
+    if (params.size() == 2 || params.size() == 3) {
         bool startOk = false;
         bool keyLengthOk = false;
         const int start = params.at(0).toInt(&startOk);
         const int encodedKeyLength = params.at(1).toInt(&keyLengthOk);
+        const bool wrappedLayout = params.size() == 3 && params.at(2) == QStringLiteral("W");
         if (startOk && keyLengthOk
-            && decryptEmbeddedPayload(segment, start, encodedKeyLength, versionOnePlaintext)) {
+            && decryptEmbeddedPayload(segment, start, encodedKeyLength, !wrappedLayout, versionOnePlaintext)) {
             return versionOnePlaintext;
         }
         return segment;
     }
 
-    if (params.size() == 3
-        && (params.at(0) == QStringLiteral("1") || params.at(0) == QStringLiteral("SF1"))) {
+    if ((params.size() == 3 || params.size() == 4)
+        && (params.at(0) == QStringLiteral("1") || params.at(0) == QStringLiteral("2")
+            || params.at(0) == QStringLiteral("SF1"))) {
         bool startOk = false;
         bool keyLengthOk = false;
         const int start = params.at(1).toInt(&startOk);
         const int encodedKeyLength = params.at(2).toInt(&keyLengthOk);
+        const bool wrappedLayout = params.at(0) == QStringLiteral("2")
+            || (params.size() == 4 && params.at(3) == QStringLiteral("W"));
         if (startOk && keyLengthOk
-            && decryptEmbeddedPayload(segment, start, encodedKeyLength, versionOnePlaintext)) {
+            && decryptEmbeddedPayload(segment, start, encodedKeyLength, !wrappedLayout, versionOnePlaintext)) {
             return versionOnePlaintext;
         }
         return segment;

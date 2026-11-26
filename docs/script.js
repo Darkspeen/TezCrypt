@@ -145,24 +145,33 @@ class SaltedFibonacciCipher {
 
     async encrypt(plaintext) {
         const payload = await this._buildPayload(plaintext, "tezcrypt");
-        return `1:${payload.start}:${payload.keyLength}:${payload.body}`;
+        const variantMarker = payload.wrappedLayout ? "W:" : "";
+        return `${TAGGED_FORMAT_VERSION}:${payload.start}:${payload.keyLength}:${variantMarker}${payload.body}`;
     }
 
     async decrypt(ciphertext) {
-        const legacyStandalone = /^(?:1|SF1):(\d+):(\d+):/.exec(ciphertext);
+        const legacyStandalone = /^SF1:(\d+):(\d+):/.exec(ciphertext);
         if (legacyStandalone) {
             const payload = ciphertext.slice(legacyStandalone[0].length);
             return this._decryptEmbeddedAtStart(
                 payload,
                 Number(legacyStandalone[1]),
-                Number(legacyStandalone[2])
+                Number(legacyStandalone[2]),
+                false,
+                false
             );
         }
 
-        const standalone = /^1:(\d+):/.exec(ciphertext);
+        const standalone = /^(1|2):(\d+):(\d+):(W:)?/.exec(ciphertext);
         if (standalone) {
             const payload = ciphertext.slice(standalone[0].length);
-            return await this._decryptEmbedded(payload, Number(standalone[1])) ?? ciphertext;
+            return this._decryptEmbeddedAtStart(
+                payload,
+                Number(standalone[2]),
+                Number(standalone[3]),
+                false,
+                standalone[1] === "2" || Boolean(standalone[4])
+            );
         }
 
         return ciphertext;
@@ -187,12 +196,14 @@ class SaltedFibonacciCipher {
             return {
                 ciphertext: "",
                 trailerParams: `${TAGGED_FORMAT_VERSION},${start},${keyBytes.length * 2}`
+                    + (keyBytes.length > 0 ? ",W" : "")
             };
         }
         const payload = await this._buildPayload(segment, params[0] ?? "tezcrypt");
         return {
             ciphertext: payload.body,
             trailerParams: `${TAGGED_FORMAT_VERSION},${payload.start},${payload.keyLength}`
+                + (payload.wrappedLayout ? ",W" : "")
         };
     }
 
@@ -203,13 +214,48 @@ class SaltedFibonacciCipher {
                 return plaintext;
             }
         }
+        if (params.length === 3 && /^\d+$/.test(params[0])
+            && /^\d+$/.test(params[1]) && params[2] === "W") {
+            return this._decryptEmbeddedAtStart(
+                segment,
+                Number(params[0]),
+                Number(params[1]),
+                false,
+                true
+            );
+        }
         if (params.length === 2 && /^\d+$/.test(params[0]) && /^\d+$/.test(params[1])) {
             return this._decryptEmbeddedAtStart(segment, Number(params[0]), Number(params[1]));
         }
-        if (params.length === 3 && /^(?:1|SF1)$/.test(params[0])) {
-            return this._decryptEmbeddedAtStart(segment, Number(params[1]), Number(params[2]));
+        if (params.length === 4 && (params[0] !== "1" || params[3] !== "W")) {
+            return segment;
+        }
+        if ((params.length === 3 || params.length === 4) && /^(?:1|2|SF1)$/.test(params[0])) {
+            return this._decryptEmbeddedAtStart(
+                segment,
+                Number(params[1]),
+                Number(params[2]),
+                false,
+                params[0] === "2" || (params.length === 4 && params[3] === "W")
+            );
         }
         return segment;
+    }
+
+    async decryptTaggedSegment(segment, params, version) {
+        if ((params.length !== 2 && params.length !== 3) || (version !== 1 && version !== 2)) {
+            return segment;
+        }
+        if (params.length === 3 && params[2] !== "W") {
+            return segment;
+        }
+        return this._decryptEmbeddedAtStart(
+            segment,
+            Number(params[0]),
+            Number(params[1]),
+            false,
+            version === 2 || (params.length === 3 && params[2] === "W")
+        );
     }
 
     async _buildPayload(plaintext, key) {
@@ -219,10 +265,12 @@ class SaltedFibonacciCipher {
         const encodedKey = this._toHex(keyBytes);
         const encodedText = this._toBase64(encryptedBytes);
         const start = await this._startIndexForKey(keyBytes);
+        const wrappedLayout = encodedKey.length > encodedText.length;
         return {
-            body: this._weaveKey(encodedText, encodedKey, start),
+            body: this._weaveKey(encodedText, encodedKey, start, wrappedLayout),
             start,
-            keyLength: encodedKey.length
+            keyLength: encodedKey.length,
+            wrappedLayout
         };
     }
 
@@ -249,14 +297,25 @@ class SaltedFibonacciCipher {
         return null;
     }
 
-    async _decryptEmbeddedAtStart(payload, start, keyLength, verifyStart = false) {
+    async _decryptEmbeddedAtStart(
+        payload,
+        start,
+        keyLength,
+        verifyStart = false,
+        legacyLayout = false
+    ) {
         if (!Number.isInteger(start) || !Number.isInteger(keyLength)
             || start < 0 || start >= 12 || keyLength < 0 || keyLength > payload.length
             || keyLength % 2 !== 0) {
             return verifyStart ? null : payload;
         }
 
-        const [encodedText, encodedKey] = this._unweaveKey(payload, start, keyLength);
+        const [encodedText, encodedKey] = this._unweaveKey(
+            payload,
+            start,
+            keyLength,
+            legacyLayout
+        );
         if (!/^(?:[0-9a-f]{2})*$/i.test(encodedKey)) {
             return verifyStart ? null : payload;
         }
@@ -298,7 +357,7 @@ class SaltedFibonacciCipher {
         return output;
     }
 
-    _buildKeyPositions(baseLength, keyLength, start) {
+    _buildLegacyKeyPositions(baseLength, keyLength, start) {
         const positions = [];
         let basePosition = Math.min(start, baseLength);
         let firstJump = 1;
@@ -314,8 +373,36 @@ class SaltedFibonacciCipher {
         return positions;
     }
 
-    _weaveKey(text, key, start) {
-        const positions = this._buildKeyPositions(text.length, key.length, start);
+    _buildKeyPositions(baseLength, keyLength, start) {
+        if (keyLength <= 0) {
+            return [];
+        }
+        const totalLength = baseLength + keyLength;
+        const occupied = new Array(totalLength).fill(false);
+        const positions = [];
+        let position = start % totalLength;
+        let firstJump = 1;
+        let secondJump = 1;
+
+        for (let i = 0; i < keyLength; i++) {
+            while (occupied[position]) {
+                position = (position + 1) % totalLength;
+            }
+            positions.push(position);
+            occupied[position] = true;
+
+            const jump = firstJump;
+            firstJump = secondJump;
+            secondJump = Math.min(totalLength, firstJump + secondJump);
+            position = (position + jump) % totalLength;
+        }
+        return positions.sort((a, b) => a - b);
+    }
+
+    _weaveKey(text, key, start, wrappedLayout) {
+        const positions = wrappedLayout
+            ? this._buildKeyPositions(text.length, key.length, start)
+            : this._buildLegacyKeyPositions(text.length, key.length, start);
         let result = "";
         let keyIndex = 0;
         let textIndex = 0;
@@ -329,9 +416,11 @@ class SaltedFibonacciCipher {
         return result;
     }
 
-    _unweaveKey(payload, start, keyLength) {
+    _unweaveKey(payload, start, keyLength, wrappedLayout = false) {
         const baseLength = payload.length - keyLength;
-        const positions = this._buildKeyPositions(baseLength, keyLength, start);
+        const positions = wrappedLayout
+            ? this._buildKeyPositions(baseLength, keyLength, start)
+            : this._buildLegacyKeyPositions(baseLength, keyLength, start);
         let text = "";
         let key = "";
         let keyIndex = 0;
@@ -440,9 +529,20 @@ function decryptVersionedSegment(algorithm, segment, trailerParams) {
         ? algorithm.trailerParameterCount()
         : 0;
     let params = trailerParams;
-    if (params.length === expectedCount + 1 && /^\d+$/.test(params[0])) {
-        if (Number(params[0]) !== TAGGED_FORMAT_VERSION) {
+    const hasWrappedVariant = typeof algorithm.metadataTag === "function"
+        && algorithm.metadataTag() === "XFA"
+        && params.length === expectedCount + 2
+        && params[expectedCount + 1] === "W";
+    if (params.length > expectedCount + 1 && !hasWrappedVariant) {
+        return segment;
+    }
+    if ((params.length === expectedCount + 1 || hasWrappedVariant) && /^\d+$/.test(params[0])) {
+        const version = Number(params[0]);
+        if (version !== 1 && version !== 2) {
             return segment;
+        }
+        if (typeof algorithm.decryptTaggedSegment === "function") {
+            return algorithm.decryptTaggedSegment(segment, params.slice(1), version);
         }
         params = params.slice(1);
     }
